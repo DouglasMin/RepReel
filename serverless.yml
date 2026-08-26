@@ -1,0 +1,286 @@
+service: instagram-reels-workout
+frameworkVersion: '^4.0.0'
+
+useDotenv: true
+
+package:
+  individually: false
+  patterns:
+    - '!**'
+    - 'src/**'
+    - '!.venv/**'
+    - '!tests/**'
+    - '!downloads/**'
+    - '!output/**'
+    - '!docs/**'
+
+custom:
+  pythonRequirements:
+    dockerizePip: true
+    useStaticCache: false
+
+provider:
+  name: aws
+  runtime: python3.12
+  stage: ${opt:stage, 'dev'}
+  region: ${opt:region, 'ap-northeast-2'}
+  profile: ${opt:aws-profile, 'developer-dongik'}
+  memorySize: 512
+  timeout: 15
+  httpApi:
+    cors: true
+  environment:
+    STAGE: ${sls:stage}
+    TABLE_NAME: ${self:service}-table-${sls:stage}
+    BUCKET_NAME: ${self:service}-media-${sls:stage}-${aws:accountId}
+    QUEUE_URL: !Ref ReelsProcessingQueue
+    OPENAI_API_KEY: ${env:OPENAI_API_KEY, ''}
+    OPENAI_MODEL: ${env:OPENAI_MODEL, 'gpt-5.4-mini'}
+    APP_SECRET_KEY: ${env:APP_SECRET_KEY, ''}
+    ALLOWED_USER_EMAILS: ${env:ALLOWED_USER_EMAILS, ''}
+  iam:
+    role:
+      statements:
+        # DynamoDB Permissions
+        - Effect: Allow
+          Action:
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+            - dynamodb:Query
+            - dynamodb:Scan
+          Resource:
+            - !GetAtt ReelsWorkoutTable.Arn
+            - !Sub '${ReelsWorkoutTable.Arn}/index/*'
+        # S3 Permissions
+        - Effect: Allow
+          Action:
+            - s3:PutObject
+            - s3:GetObject
+            - s3:ListBucket
+          Resource:
+            - !Sub 'arn:aws:s3:::${self:service}-media-${sls:stage}-${aws:accountId}'
+            - !Sub 'arn:aws:s3:::${self:service}-media-${sls:stage}-${aws:accountId}/*'
+        # SQS Permissions
+        - Effect: Allow
+          Action:
+            - sqs:SendMessage
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+          Resource:
+            - !GetAtt ReelsProcessingQueue.Arn
+
+functions:
+  # 1. Ingest Handler (POST /reels) -> Auth Guard -> Returns 202 Accepted & pushes to SQS
+  ingest:
+    handler: src/handlers/ingest.handler
+    description: Fast protected entrypoint for receiving Instagram Reel URLs
+    timeout: 10
+    memorySize: 512
+    events:
+      - httpApi:
+          path: /reels
+          method: post
+
+  # 2. Asynchronous Background Processor (SQS -> yt-dlp -> Whisper -> gpt-5.4-mini -> DynamoDB/S3)
+  processor:
+    handler: src/handlers/processor.handler
+    description: Background worker for audio download, STT, and LLM reasoning
+    timeout: 300
+    memorySize: 1536
+    events:
+      - sqs:
+          arn: !GetAtt ReelsProcessingQueue.Arn
+          batchSize: 1
+          maximumConcurrency: 2 # Limits SQS worker concurrency without depleting account unreserved pool
+
+  # 3. Job Status Check (GET /jobs/{job_id})
+  getJob:
+    handler: src/handlers/jobs.get_status
+    description: Poll job processing status
+    timeout: 10
+    memorySize: 256
+    events:
+      - httpApi:
+          path: /jobs/{job_id}
+          method: get
+
+  # 4. Get Workout Program by ID (GET /programs/{program_id})
+  getProgram:
+    handler: src/handlers/programs.get_by_id
+    description: Retrieve complete hierarchical WorkoutProgram
+    timeout: 10
+    memorySize: 256
+    events:
+      - httpApi:
+          path: /programs/{program_id}
+          method: get
+
+  # 5. List Programs by Creator (GET /programs)
+  listPrograms:
+    handler: src/handlers/programs.list_programs
+    description: List workout programs filtered by creator
+    timeout: 10
+    memorySize: 256
+    events:
+      - httpApi:
+          path: /programs
+          method: get
+
+  # 6. Update Program / Confirm Review (PUT /programs/{program_id})
+  updateProgram:
+    handler: src/handlers/programs.update_program
+    description: Update user-confirmed weights, sets, and notes for a program
+    timeout: 10
+    memorySize: 256
+    events:
+      - httpApi:
+          path: /programs/{program_id}
+          method: put
+
+  # 7. Delete Program (DELETE /programs/{program_id})
+  deleteProgram:
+    handler: src/handlers/programs.delete_by_id
+    description: Delete workout program from database
+    timeout: 10
+    memorySize: 256
+    events:
+      - httpApi:
+          path: /programs/{program_id}
+          method: delete
+
+  # 8. Merge Series Programs (POST /programs/merge)
+  mergePrograms:
+    handler: src/handlers/programs.merge_programs
+    description: Merge multi-part Reel routines (Part 1, Part 2, Part 3) into 1 unified program
+    timeout: 25
+    memorySize: 512
+    events:
+      - httpApi:
+          path: /programs/merge
+          method: post
+
+  # 9. Progressive Overload Recommendation (GET /programs/{program_id}/next-session)
+  getNextSession:
+    handler: src/handlers/programs.get_next_session
+    description: Calculate target working weights and overload progression based on past logs
+    timeout: 20
+    memorySize: 512
+    events:
+      - httpApi:
+          path: /programs/{program_id}/next-session
+          method: get
+
+  # 10. AI Coach Query (POST /programs/{program_id}/coach-query)
+  coachQuery:
+    handler: src/handlers/programs.coach_query
+    description: Contextual strength & conditioning coaching answers for imported routines
+    timeout: 20
+    memorySize: 512
+    events:
+      - httpApi:
+          path: /programs/{program_id}/coach-query
+          method: post
+
+  # 11. Exercise Substitution (POST /exercises/substitute)
+  substituteExercise:
+    handler: src/handlers/exercises.substitute_exercise
+    description: Suggest 3 biomechanically matched alternative exercises for crowded/missing gym gear
+    timeout: 20
+    memorySize: 512
+    events:
+      - httpApi:
+          path: /exercises/substitute
+          method: post
+
+  # 12. Log Live Workout Session (POST /sessions)
+  createSession:
+    handler: src/handlers/sessions.create_session
+    description: Log actual executed workout session data (weight, reps, RPE)
+    timeout: 10
+    memorySize: 256
+    events:
+      - httpApi:
+          path: /sessions
+          method: post
+
+  # 13. List Workout History (GET /sessions)
+  listSessions:
+    handler: src/handlers/sessions.list_sessions
+    description: List past workout session logs for progressive overload tracking
+    timeout: 10
+    memorySize: 256
+    events:
+      - httpApi:
+          path: /sessions
+          method: get
+
+resources:
+  Resources:
+    # -------------------------------------------------------------
+    # SQS DEAD LETTER QUEUE (DLQ)
+    # -------------------------------------------------------------
+    ReelsProcessingDLQ:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-dlq-${sls:stage}
+        MessageRetentionPeriod: 1209600 # 14 days
+
+    # -------------------------------------------------------------
+    # SQS PROCESSING QUEUE
+    # -------------------------------------------------------------
+    ReelsProcessingQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-queue-${sls:stage}
+        VisibilityTimeout: 360 # Must exceed Lambda timeout (300s)
+        RedrivePolicy:
+          deadLetterTargetArn: !GetAtt ReelsProcessingDLQ.Arn
+          maxReceiveCount: 3
+
+    # -------------------------------------------------------------
+    # DYNAMODB SINGLE TABLE DESIGN
+    # -------------------------------------------------------------
+    ReelsWorkoutTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-table-${sls:stage}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: PK
+            AttributeType: S
+          - AttributeName: SK
+            AttributeType: S
+          - AttributeName: GSI1_PK
+            AttributeType: S
+          - AttributeName: GSI1_SK
+            AttributeType: S
+        KeySchema:
+          - AttributeName: PK
+            KeyType: HASH
+          - AttributeName: SK
+            KeyType: RANGE
+        GlobalSecondaryIndexes:
+          - IndexName: GSI1
+            KeySchema:
+              - AttributeName: GSI1_PK
+                KeyType: HASH
+              - AttributeName: GSI1_SK
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+
+    # -------------------------------------------------------------
+    # S3 MEDIA & ARTIFACT STORAGE BUCKET
+    # -------------------------------------------------------------
+    ReelsMediaBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:service}-media-${sls:stage}-${aws:accountId}
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: true
+          BlockPublicPolicy: true
+          IgnorePublicAcls: true
+          RestrictPublicBuckets: true
