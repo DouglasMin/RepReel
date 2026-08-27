@@ -29,6 +29,68 @@ def decimal_to_python(obj: Any) -> Any:
     return obj
 
 
+def calculate_session_volume_analytics(session_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Planfit-style workout volume and progressive overload calculator:
+    - Total Volume (총 볼륨 kg): sum(weight_kg * reps) for all completed sets
+    - Total Sets & Reps
+    - Estimated 1RM per exercise via Epley Formula: 1RM = weight * (1 + reps / 30)
+    - Volume distribution per exercise
+    """
+    total_volume_kg = 0.0
+    total_sets_completed = 0
+    total_reps_completed = 0
+    exercise_analytics: List[Dict[str, Any]] = []
+
+    for exercise in session_data.get("completed_exercises", []):
+        ex_id = exercise.get("exercise_id", "unknown")
+        ex_name = exercise.get("exercise_name", "Unknown Exercise")
+        ex_volume = 0.0
+        ex_sets_completed = 0
+        ex_reps_completed = 0
+        max_est_1rm = 0.0
+        top_set_weight = 0.0
+
+        for s in exercise.get("sets", []):
+            if s.get("completed", True):
+                weight = float(s.get("weight_kg", 0.0))
+                reps = int(s.get("reps", 0))
+                set_volume = weight * reps
+
+                ex_volume += set_volume
+                ex_sets_completed += 1
+                ex_reps_completed += reps
+                total_volume_kg += set_volume
+                total_sets_completed += 1
+                total_reps_completed += reps
+
+                if weight > top_set_weight:
+                    top_set_weight = weight
+
+                # Epley Formula for 1RM estimation
+                if reps > 0 and weight > 0:
+                    est_1rm = round(weight * (1.0 + reps / 30.0), 1)
+                    if est_1rm > max_est_1rm:
+                        max_est_1rm = est_1rm
+
+        exercise_analytics.append({
+            "exercise_id": ex_id,
+            "exercise_name": ex_name,
+            "volume_kg": round(ex_volume, 1),
+            "completed_sets": ex_sets_completed,
+            "completed_reps": ex_reps_completed,
+            "top_set_weight_kg": round(top_set_weight, 1),
+            "estimated_1rm_kg": round(max_est_1rm, 1),
+        })
+
+    return {
+        "total_volume_kg": round(total_volume_kg, 1),
+        "total_sets_completed": total_sets_completed,
+        "total_reps_completed": total_reps_completed,
+        "exercise_breakdown": exercise_analytics,
+    }
+
+
 class DynamoDBClient:
     def __init__(self, table_name: Optional[str] = None):
         self.table_name = table_name or os.getenv("TABLE_NAME", "instagram-reels-workout-table-dev")
@@ -182,7 +244,50 @@ class DynamoDBClient:
         return [decimal_to_python(item) for item in res.get("Items", [])]
 
     # -------------------------------------------------------------
-    # SESSION LOGGING OPERATIONS
+    # ACTIVE IN-PROGRESS WORKOUT SESSION DRAFT (Live Checklists)
+    # -------------------------------------------------------------
+    def save_active_session(self, user_id: str, session_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Saves or updates real-time in-progress workout draft (sets checked, weights, live timers).
+        """
+        now = int(time.time())
+        analytics = calculate_session_volume_analytics(session_data)
+        
+        item = {
+            "PK": f"USER#{user_id}",
+            "SK": "ACTIVE_SESSION",
+            "entity_type": "ACTIVE_SESSION",
+            "user_id": user_id,
+            "program_id": session_data.get("program_id"),
+            "day_number": session_data.get("day_number", 1),
+            "started_at": session_data.get("started_at", now),
+            "last_updated_at": now,
+            "session_data": float_to_decimal(session_data),
+            "volume_analytics": float_to_decimal(analytics),
+        }
+        self.table.put_item(Item=item)
+        return decimal_to_python(item)
+
+    def get_active_session(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieves active in-progress workout draft for resuming upon app launch.
+        """
+        res = self.table.get_item(Key={"PK": f"USER#{user_id}", "SK": "ACTIVE_SESSION"})
+        item = res.get("Item")
+        return decimal_to_python(item) if item else None
+
+    def delete_active_session(self, user_id: str) -> bool:
+        """
+        Clears active draft when workout is finished or cancelled.
+        """
+        res = self.table.get_item(Key={"PK": f"USER#{user_id}", "SK": "ACTIVE_SESSION"})
+        if not res.get("Item"):
+            return False
+        self.table.delete_item(Key={"PK": f"USER#{user_id}", "SK": "ACTIVE_SESSION"})
+        return True
+
+    # -------------------------------------------------------------
+    # COMPLETED SESSION LOGGING & HISTORY
     # -------------------------------------------------------------
     def log_workout_session(
         self,
@@ -192,7 +297,12 @@ class DynamoDBClient:
         user_id: str,
         session_data: Dict[str, Any],
     ) -> Dict[str, Any]:
+        """
+        Logs completed workout with Planfit-style volume analytics and clears active draft.
+        """
         now = int(time.time())
+        analytics = calculate_session_volume_analytics(session_data)
+
         item = {
             "PK": f"USER#{user_id}",
             "SK": f"SESSION#{session_id}",
@@ -202,12 +312,18 @@ class DynamoDBClient:
             "day_number": day_number,
             "user_id": user_id,
             "logged_at": session_data.get("logged_at", now),
+            "duration_seconds": session_data.get("duration_seconds", 0),
             "session_data": float_to_decimal(session_data),
+            "volume_analytics": float_to_decimal(analytics),
             "created_at": now,
             "GSI1_PK": f"USER_PROGRAM#{user_id}#{program_id}",
             "GSI1_SK": str(now),
         }
         self.table.put_item(Item=item)
+        
+        # Clean up any active in-progress draft
+        self.delete_active_session(user_id=user_id)
+        
         return decimal_to_python(item)
 
     def list_workout_sessions(

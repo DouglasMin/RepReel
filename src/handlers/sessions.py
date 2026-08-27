@@ -13,6 +13,7 @@ def create_session(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     POST /sessions
     Logs an executed workout session with actual reps, weights lifted, RPE, and notes.
+    Calculates total volume (Planfit-style) and cleans up active draft.
     """
     headers = event.get("headers") or {}
     is_auth, auth_err = verify_request_authorization(headers)
@@ -66,6 +67,119 @@ def create_session(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "headers": {"Content-Type": "application/json"},
             "body": json.dumps({"error": str(e)}),
         }
+
+
+def save_active_session(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """
+    PUT /sessions/active
+    Saves or updates current in-progress workout draft in real time (called per set checked).
+    """
+    headers = event.get("headers") or {}
+    is_auth, auth_err = verify_request_authorization(headers)
+    if not is_auth:
+        return {
+            "statusCode": 403,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": "Forbidden", "message": auth_err}),
+        }
+
+    user_id = (
+        headers.get("x-user-email")
+        or headers.get("x-user-id")
+        or "default_user"
+    )
+
+    try:
+        body = json.loads(event.get("body") or "{}")
+        saved_active = db.save_active_session(user_id=user_id, session_data=body)
+
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({
+                "success": True,
+                "active_session": saved_active,
+            }),
+        }
+    except Exception as e:
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": str(e)}),
+        }
+
+
+def get_active_session(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """
+    GET /sessions/active
+    Retrieves in-progress workout draft for the user (to resume if app was closed).
+    """
+    headers = event.get("headers") or {}
+    is_auth, auth_err = verify_request_authorization(headers)
+    if not is_auth:
+        return {
+            "statusCode": 403,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": "Forbidden", "message": auth_err}),
+        }
+
+    user_id = (
+        headers.get("x-user-email")
+        or headers.get("x-user-id")
+        or "default_user"
+    )
+
+    active_session = db.get_active_session(user_id=user_id)
+    if not active_session:
+        return {
+            "statusCode": 404,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({
+                "has_active_session": False,
+                "message": "No active workout in progress.",
+            }),
+        }
+
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps({
+            "has_active_session": True,
+            "active_session": active_session,
+        }),
+    }
+
+
+def delete_active_session(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """
+    DELETE /sessions/active
+    Discards or cancels the in-progress workout draft.
+    """
+    headers = event.get("headers") or {}
+    is_auth, auth_err = verify_request_authorization(headers)
+    if not is_auth:
+        return {
+            "statusCode": 403,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": "Forbidden", "message": auth_err}),
+        }
+
+    user_id = (
+        headers.get("x-user-email")
+        or headers.get("x-user-id")
+        or "default_user"
+    )
+
+    deleted = db.delete_active_session(user_id=user_id)
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps({
+            "success": True,
+            "deleted": deleted,
+            "message": "Active session discarded successfully.",
+        }),
+    }
 
 
 def list_sessions(event: Dict[str, Any], context: Any) -> Dict[str, Any]:

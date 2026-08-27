@@ -444,16 +444,28 @@ public struct CoachQueryResponse: Codable, Sendable {
     }
 }
 
-// MARK: - Live Workout Session Logging Models
+// MARK: - Planfit-Style Live Workout Session & Volume Tracking Models
 
 public struct LoggedSet: Codable, Identifiable, Sendable {
     public var id: Int { setNumber }
     
     public let setNumber: Int
-    public var weightKg: Double
-    public var reps: Int
-    public var rpe: Double?
-    public var completed: Bool
+    public var weightKg: Double      // Customizable per-set weight (e.g. Set 1: 60kg, Set 2: 70kg)
+    public var reps: Int              // Executed reps
+    public var rpe: Double?           // Rate of Perceived Exertion (1.0 - 10.0)
+    public var completed: Bool        // ✅ Checkbox state (checked upon set completion)
+    
+    public var setVolumeKg: Double {
+        return completed ? (weightKg * Double(reps)) : 0.0
+    }
+    
+    public init(setNumber: Int, weightKg: Double, reps: Int, rpe: Double? = nil, completed: Bool = false) {
+        self.setNumber = setNumber
+        self.weightKg = weightKg
+        self.reps = reps
+        self.rpe = rpe
+        self.completed = completed
+    }
     
     enum CodingKeys: String, CodingKey {
         case setNumber = "set_number"
@@ -471,10 +483,60 @@ public struct ExecutedExerciseLog: Codable, Identifiable, Sendable {
     public let exerciseName: String
     public var sets: [LoggedSet]
     
+    public var totalExerciseVolumeKg: Double {
+        return sets.reduce(0.0) { $0 + $1.setVolumeKg }
+    }
+    
+    public init(exerciseId: String, exerciseName: String, sets: [LoggedSet]) {
+        self.exerciseId = exerciseId
+        self.exerciseName = exerciseName
+        self.sets = sets
+    }
+    
     enum CodingKeys: String, CodingKey {
         case exerciseId = "exercise_id"
         case exerciseName = "exercise_name"
         case sets
+    }
+}
+
+public struct ExerciseVolumeAnalytics: Codable, Identifiable, Sendable {
+    public var id: String { exerciseId }
+    
+    public let exerciseId: String
+    public let exerciseName: String
+    public let volumeKg: Double
+    public let completedSets: Int
+    public let completedReps: Int
+    public let topSetWeightKg: Double
+    public let estimated1rmKg: Double
+    
+    enum CodingKeys: String, CodingKey {
+        case exerciseId = "exercise_id"
+        case exerciseName = "exercise_name"
+        case volumeKg = "volume_kg"
+        case completedSets = "completed_sets"
+        case completedReps = "completed_reps"
+        case topSetWeightKg = "top_set_weight_kg"
+        case estimated1rmKg = "estimated_1rm_kg"
+    }
+}
+
+public struct WorkoutVolumeAnalytics: Codable, Sendable {
+    public let totalVolumeKg: Double          // e.g. 5,420.0 kg (Total Tonnage)
+    public let totalSetsCompleted: Int        // e.g. 18 sets
+    public let totalRepsCompleted: Int        // e.g. 165 reps
+    public let exerciseBreakdown: [ExerciseVolumeAnalytics]
+    
+    public var volumeSummaryString: String {
+        return "\(String(format: "%.1f", totalVolumeKg)) kg (\(totalSetsCompleted)세트 · \(totalRepsCompleted)회)"
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case totalVolumeKg = "total_volume_kg"
+        case totalSetsCompleted = "total_sets_completed"
+        case totalRepsCompleted = "total_reps_completed"
+        case exerciseBreakdown = "exercise_breakdown"
     }
 }
 
@@ -487,7 +549,26 @@ public struct WorkoutSessionLog: Codable, Identifiable, Sendable {
     public let loggedAt: Int
     public let durationSeconds: Int?
     public var completedExercises: [ExecutedExerciseLog]
+    public var volumeAnalytics: WorkoutVolumeAnalytics?
     public var sessionNotes: String?
+    
+    public init(
+        sessionId: String? = nil,
+        programId: String,
+        dayNumber: Int,
+        loggedAt: Int = Int(Date().timeIntervalSince1970),
+        durationSeconds: Int? = nil,
+        completedExercises: [ExecutedExerciseLog],
+        sessionNotes: String? = nil
+    ) {
+        self.sessionId = sessionId
+        self.programId = programId
+        self.dayNumber = dayNumber
+        self.loggedAt = loggedAt
+        self.durationSeconds = durationSeconds
+        self.completedExercises = completedExercises
+        self.sessionNotes = sessionNotes
+    }
     
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
@@ -496,6 +577,41 @@ public struct WorkoutSessionLog: Codable, Identifiable, Sendable {
         case loggedAt = "logged_at"
         case durationSeconds = "duration_seconds"
         case completedExercises = "completed_exercises"
+        case volumeAnalytics = "volume_analytics"
         case sessionNotes = "session_notes"
+    }
+}
+
+// MARK: - Active In-Progress Workout Draft Models (Resume Prompt)
+
+public struct ActiveWorkoutDraft: Codable, Sendable {
+    public let userId: String
+    public let programId: String?
+    public let dayNumber: Int
+    public let startedAt: Int
+    public let lastUpdatedAt: Int
+    public var sessionData: WorkoutSessionLog
+    public var volumeAnalytics: WorkoutVolumeAnalytics?
+    
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case programId = "program_id"
+        case dayNumber = "day_number"
+        case startedAt = "started_at"
+        case lastUpdatedAt = "last_updated_at"
+        case sessionData = "session_data"
+        case volumeAnalytics = "volume_analytics"
+    }
+}
+
+public struct ActiveSessionResponse: Codable, Sendable {
+    public let hasActiveSession: Bool
+    public let activeSession: ActiveWorkoutDraft?
+    public let message: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case hasActiveSession = "has_active_session"
+        case activeSession = "active_session"
+        case message
     }
 }

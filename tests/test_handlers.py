@@ -334,3 +334,61 @@ def test_list_sessions_handler(mock_list):
     assert response["statusCode"] == 200
     body = json.loads(response["body"])
     assert body["count"] == 1
+
+
+@patch("src.handlers.sessions.db.save_active_session")
+def test_save_active_session_handler(mock_save):
+    mock_save.return_value = {"user_id": "me@example.com", "program_id": "prog_123"}
+    event = {
+        "headers": {"x-user-email": "me@example.com"},
+        "body": json.dumps({"program_id": "prog_123", "completed_exercises": []}),
+    }
+    response = sessions.save_active_session(event, None)
+    assert response["statusCode"] == 200
+    body = json.loads(response["body"])
+    assert body["success"] is True
+
+
+@patch("src.handlers.sessions.db.get_active_session")
+def test_get_active_session_handler(mock_get):
+    mock_get.return_value = {"user_id": "me@example.com", "program_id": "prog_123"}
+    event = {"headers": {"x-user-email": "me@example.com"}}
+    response = sessions.get_active_session(event, None)
+    assert response["statusCode"] == 200
+    body = json.loads(response["body"])
+    assert body["has_active_session"] is True
+
+
+@patch("src.handlers.sessions.db.delete_active_session")
+def test_delete_active_session_handler(mock_del):
+    mock_del.return_value = True
+    event = {"headers": {"x-user-email": "me@example.com"}}
+    response = sessions.delete_active_session(event, None)
+    assert response["statusCode"] == 200
+    body = json.loads(response["body"])
+    assert body["success"] is True
+
+
+def test_volume_analytics_calculation():
+    from src.db.client import calculate_session_volume_analytics
+    sample_session = {
+        "completed_exercises": [
+            {
+                "exercise_id": "bench_press",
+                "exercise_name": "Bench Press",
+                "sets": [
+                    {"set_number": 1, "weight_kg": 80.0, "reps": 10, "completed": True},
+                    {"set_number": 2, "weight_kg": 85.0, "reps": 8, "completed": True},
+                    {"set_number": 3, "weight_kg": 90.0, "reps": 6, "completed": False}, # Unchecked
+                ]
+            }
+        ]
+    }
+    analytics = calculate_session_volume_analytics(sample_session)
+    # Set 1: 80 * 10 = 800
+    # Set 2: 85 * 8 = 680
+    # Total = 1480.0 kg
+    assert analytics["total_volume_kg"] == 1480.0
+    assert analytics["total_sets_completed"] == 2
+    assert analytics["total_reps_completed"] == 18
+    assert analytics["exercise_breakdown"][0]["estimated_1rm_kg"] > 85.0
