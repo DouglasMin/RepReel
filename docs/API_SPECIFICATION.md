@@ -1,6 +1,6 @@
 # Instagram Reels Workout App — Complete REST API Specification
 
-**Base URL**: `https://ixyswqd3lg.execute-api.ap-northeast-2.amazonaws.com` (AWS HTTP API)  
+**Base URL**: `https://szcr4meit6.execute-api.ap-northeast-2.amazonaws.com` (AWS HTTP API)  
 **Stage**: `/dev` (or `/prod`)  
 **Protocol**: HTTPS  
 **Content-Type**: `application/json`

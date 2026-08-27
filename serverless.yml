@@ -12,10 +12,6 @@ provider:
   timeout: 15
   httpApi:
     cors: true
-  ecr:
-    images:
-      repreel-app:
-        path: ./
   environment:
     STAGE: ${sls:stage}
     TABLE_NAME: ${self:service}-table-${sls:stage}
@@ -64,7 +60,7 @@ functions:
   # 1. Ingest Handler (POST /reels)
   ingest:
     image:
-      name: repreel-app
+      uri: 612529367436.dkr.ecr.ap-northeast-2.amazonaws.com/repreel-backend:latest
       command: ["src.handlers.ingest.handler"]
     description: Validate Instagram Reel URL and enqueue processing job
     events:
@@ -75,7 +71,7 @@ functions:
   # 2. Asynchronous SQS Processor Worker
   processor:
     image:
-      name: repreel-app
+      uri: 612529367436.dkr.ecr.ap-northeast-2.amazonaws.com/repreel-backend:latest
       command: ["src.handlers.processor.handler"]
     description: Background worker processing Instagram Reels download, STT, and GPT-5.4 extraction
     timeout: 300
@@ -89,7 +85,7 @@ functions:
   # 3. Get Job Status (GET /jobs/{job_id})
   getJob:
     image:
-      name: repreel-app
+      uri: 612529367436.dkr.ecr.ap-northeast-2.amazonaws.com/repreel-backend:latest
       command: ["src.handlers.jobs.get_job_status"]
     description: Polling endpoint for frontend client to check video processing progress
     events:
@@ -100,7 +96,7 @@ functions:
   # 4. Get Workout Program by ID (GET /programs/{program_id})
   getProgram:
     image:
-      name: repreel-app
+      uri: 612529367436.dkr.ecr.ap-northeast-2.amazonaws.com/repreel-backend:latest
       command: ["src.handlers.programs.get_by_id"]
     description: Fetch extracted hierarchical workout program details
     events:
@@ -111,7 +107,7 @@ functions:
   # 5. List Programs by Creator (GET /programs)
   listPrograms:
     image:
-      name: repreel-app
+      uri: 612529367436.dkr.ecr.ap-northeast-2.amazonaws.com/repreel-backend:latest
       command: ["src.handlers.programs.list_by_creator"]
     description: Query workout programs by creator or list latest programs
     events:
@@ -122,7 +118,7 @@ functions:
   # 6. Update / Confirm Custom Program (PUT /programs/{program_id})
   updateProgram:
     image:
-      name: repreel-app
+      uri: 612529367436.dkr.ecr.ap-northeast-2.amazonaws.com/repreel-backend:latest
       command: ["src.handlers.programs.update_program"]
     description: Allow user to customize and confirm extracted exercises, sets, and weights
     events:
@@ -133,7 +129,7 @@ functions:
   # 7. Delete Program (DELETE /programs/{program_id})
   deleteProgram:
     image:
-      name: repreel-app
+      uri: 612529367436.dkr.ecr.ap-northeast-2.amazonaws.com/repreel-backend:latest
       command: ["src.handlers.programs.delete_by_id"]
     description: Delete workout program from library
     events:
@@ -144,7 +140,7 @@ functions:
   # 8. Merge Series Programs (POST /programs/merge)
   mergePrograms:
     image:
-      name: repreel-app
+      uri: 612529367436.dkr.ecr.ap-northeast-2.amazonaws.com/repreel-backend:latest
       command: ["src.handlers.programs.merge_programs"]
     description: Merge multi-part reel programs (Part 1, Part 2, Part 3) into a single split
     timeout: 25
@@ -157,7 +153,7 @@ functions:
   # 9. AI Progressive Overload Predictor (GET /programs/{program_id}/next-session)
   getNextSession:
     image:
-      name: repreel-app
+      uri: 612529367436.dkr.ecr.ap-northeast-2.amazonaws.com/repreel-backend:latest
       command: ["src.handlers.programs.get_next_session"]
     description: AI calculation of target weights and reps for next session based on previous logs
     timeout: 20
@@ -170,7 +166,7 @@ functions:
   # 10. AI Coach Query (POST /programs/{program_id}/coach-query)
   coachQuery:
     image:
-      name: repreel-app
+      uri: 612529367436.dkr.ecr.ap-northeast-2.amazonaws.com/repreel-backend:latest
       command: ["src.handlers.programs.coach_query"]
     description: Contextual strength & conditioning coaching answers for imported routines
     timeout: 20
@@ -183,7 +179,7 @@ functions:
   # 11. Exercise Substitution (POST /exercises/substitute)
   substituteExercise:
     image:
-      name: repreel-app
+      uri: 612529367436.dkr.ecr.ap-northeast-2.amazonaws.com/repreel-backend:latest
       command: ["src.handlers.exercises.substitute_exercise"]
     description: Suggest 3 biomechanically matched alternative exercises for crowded/missing gym gear
     timeout: 20
@@ -196,7 +192,7 @@ functions:
   # 12. Log Live Workout Session (POST /sessions)
   createSession:
     image:
-      name: repreel-app
+      uri: 612529367436.dkr.ecr.ap-northeast-2.amazonaws.com/repreel-backend:latest
       command: ["src.handlers.sessions.create_session"]
     description: Log actual executed workout session data (weight, reps, RPE) and calculate Planfit volume
     timeout: 10
@@ -209,7 +205,7 @@ functions:
   # 13. Save In-Progress Workout Draft (PUT /sessions/active)
   saveActiveSession:
     image:
-      name: repreel-app
+      uri: 612529367436.dkr.ecr.ap-northeast-2.amazonaws.com/repreel-backend:latest
       command: ["src.handlers.sessions.save_active_session"]
     description: Save/update real-time workout checklist state as user checks sets
     timeout: 10
@@ -222,7 +218,7 @@ functions:
   # 14. Get In-Progress Workout Draft (GET /sessions/active)
   getActiveSession:
     image:
-      name: repreel-app
+      uri: 612529367436.dkr.ecr.ap-northeast-2.amazonaws.com/repreel-backend:latest
       command: ["src.handlers.sessions.get_active_session"]
     description: Retrieve in-progress active workout draft to prompt resume dialog on app start
     timeout: 10
@@ -235,7 +231,7 @@ functions:
   # 15. Discard/Cancel In-Progress Workout Draft (DELETE /sessions/active)
   deleteActiveSession:
     image:
-      name: repreel-app
+      uri: 612529367436.dkr.ecr.ap-northeast-2.amazonaws.com/repreel-backend:latest
       command: ["src.handlers.sessions.delete_active_session"]
     description: Discard or cancel active in-progress workout draft
     timeout: 10
@@ -248,7 +244,7 @@ functions:
   # 16. List Workout History (GET /sessions)
   listSessions:
     image:
-      name: repreel-app
+      uri: 612529367436.dkr.ecr.ap-northeast-2.amazonaws.com/repreel-backend:latest
       command: ["src.handlers.sessions.list_sessions"]
     description: List past workout session logs for progressive overload tracking
     timeout: 10
