@@ -57,10 +57,10 @@ import UniformTypeIdentifiers
 class ShareViewController: UIViewController {
     
     // MARK: - Configuration Constants
-    private let apiBaseURL = "https://<YOUR-API-ID>.execute-api.ap-northeast-2.amazonaws.com"
-    private let appSecretKey = "your-custom-ios-app-secret-token" // Matches APP_SECRET_KEY
-    private let userEmail = "dongik@example.com"                  // User email
-    private let appGroupID = "group.com.yourname.reelsworkout"
+    private let apiBaseURL = "https://szcr4meit6.execute-api.ap-northeast-2.amazonaws.com"
+    private let appSecretKey = "reels-workout-dev-secret-2026"
+    private let userEmail = "dongik@example.com"
+    private let appGroupID = "group.com.dongik.repreel"
     
     // MARK: - UI Components
     private let containerView: UIView = {
