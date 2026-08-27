@@ -243,6 +243,13 @@ class DynamoDBClient:
         )
         return [decimal_to_python(item) for item in res.get("Items", [])]
 
+    def list_all_programs(self, limit: int = 50) -> List[Dict[str, Any]]:
+        res = self.table.scan(
+            FilterExpression=Attr("entity_type").eq("PROGRAM"),
+            Limit=limit,
+        )
+        return [decimal_to_python(item) for item in res.get("Items", [])]
+
     # -------------------------------------------------------------
     # ACTIVE IN-PROGRESS WORKOUT SESSION DRAFT (Live Checklists)
     # -------------------------------------------------------------

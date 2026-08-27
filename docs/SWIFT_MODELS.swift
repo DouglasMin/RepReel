@@ -546,7 +546,7 @@ public struct WorkoutSessionLog: Codable, Identifiable, Sendable {
     public let sessionId: String?
     public let programId: String
     public let dayNumber: Int
-    public let loggedAt: Int
+    public let loggedAt: Int?
     public let durationSeconds: Int?
     public var completedExercises: [ExecutedExerciseLog]
     public var volumeAnalytics: WorkoutVolumeAnalytics?
@@ -556,7 +556,7 @@ public struct WorkoutSessionLog: Codable, Identifiable, Sendable {
         sessionId: String? = nil,
         programId: String,
         dayNumber: Int,
-        loggedAt: Int = Int(Date().timeIntervalSince1970),
+        loggedAt: Int? = Int(Date().timeIntervalSince1970),
         durationSeconds: Int? = nil,
         completedExercises: [ExecutedExerciseLog],
         sessionNotes: String? = nil

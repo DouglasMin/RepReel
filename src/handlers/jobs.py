@@ -34,3 +34,7 @@ def get_status(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         "headers": {"Content-Type": "application/json"},
         "body": json.dumps(job),
     }
+
+
+# Alias for backward/command compatibility
+get_job_status = get_status

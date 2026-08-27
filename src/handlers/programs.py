@@ -53,14 +53,17 @@ def list_programs(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     if creator:
         programs = db.list_programs_by_creator(creator=creator, limit=limit)
     else:
-        # Default empty list if no creator provided
-        programs = []
+        programs = db.list_all_programs(limit=limit)
 
     return {
         "statusCode": 200,
         "headers": {"Content-Type": "application/json"},
         "body": json.dumps({"count": len(programs), "programs": programs}),
     }
+
+
+# Alias for backward/command compatibility
+list_by_creator = list_programs
 
 
 def update_program(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
