@@ -392,3 +392,25 @@ def test_volume_analytics_calculation():
     assert analytics["total_sets_completed"] == 2
     assert analytics["total_reps_completed"] == 18
     assert analytics["exercise_breakdown"][0]["estimated_1rm_kg"] > 85.0
+
+
+def test_should_use_vision_pipeline_text_rich():
+    from src.extractor import should_use_vision_pipeline
+    transcript = "오늘 가슴 루틴입니다. 1번 인클라인 벤치프레스 4세트 10회, 2번 덤벨 플라이 3세트 12회 진행합니다."
+    caption = "가슴 폭발 루틴"
+    assert should_use_vision_pipeline(transcript, caption) is False
+
+
+def test_should_use_vision_pipeline_silent_or_music():
+    from src.extractor import should_use_vision_pipeline
+    # Silent / only music lyrics
+    transcript = "[음악] baby one more time ♪"
+    caption = "#오운완 #헬스타그램"
+    assert should_use_vision_pipeline(transcript, caption) is True
+
+
+def test_should_use_vision_pipeline_caption_fallback():
+    from src.extractor import should_use_vision_pipeline
+    transcript = "" # No voiceover
+    caption = "오늘의 하체 루틴: 1. 스쿼트 5세트 8회, 2. 레그프레스 4세트 12회, 3. 레그익스텐션 3세트 15회"
+    assert should_use_vision_pipeline(transcript, caption) is False

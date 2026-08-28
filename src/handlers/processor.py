@@ -1,26 +1,41 @@
 import os
 import json
+import shutil
 import boto3
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 
-from src.downloader import download_reel
+from src.downloader import download_reel, extract_video_keyframes
 from src.transcribe import transcribe_audio
-from src.extractor import extract_workout_program
+from src.extractor import extract_workout_program, should_use_vision_pipeline
 from src.db.client import DynamoDBClient
 
 s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "ap-northeast-2"))
 db = DynamoDBClient()
 
 
+def count_program_exercises(program_obj: Any) -> int:
+    """Counts total structured exercises across all days in the program."""
+    try:
+        return sum(
+            len(grp.exercises)
+            for day in getattr(program_obj, "days", [])
+            for grp in getattr(day, "exercise_groups", [])
+        )
+    except Exception:
+        return 0
+
+
 def process_single_job(job_id: str, url: str, reel_id: str) -> None:
     api_key = os.getenv("OPENAI_API_KEY")
     bucket_name = os.getenv("BUCKET_NAME")
-    model = os.getenv("OPENAI_MODEL", "o3-mini")
+    model = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+
+    tmp_dir = f"/tmp/downloads_{job_id}"
+    frames_dir = f"/tmp/frames_{job_id}"
 
     try:
-        # 1. Download Reel audio and extract captions (/tmp directory in Lambda)
-        tmp_dir = "/tmp/downloads"
+        # 1. Download Reel video (.mp4), audio (.mp3), and post caption
         download_result = download_reel(url, output_dir=tmp_dir)
 
         # 2. Upload audio to S3 if available
@@ -38,18 +53,53 @@ def process_single_job(job_id: str, url: str, reel_id: str) -> None:
             try:
                 transcript = transcribe_audio(download_result.audio_path, api_key=api_key)
             except Exception as stt_err:
-                print(f"Whisper STT failed ({stt_err}), continuing with caption...")
+                print(f"Whisper STT failed ({stt_err}), continuing with caption/vision...")
 
-        # 4. Multi-Role Structured Extraction with o3-mini
+        # 4. Smart Routing Decision: Text Mode vs Vision Mode
+        use_vision = should_use_vision_pipeline(transcript=transcript, caption=download_result.caption)
+        keyframes: List[str] = []
+
+        if use_vision and download_result.video_path:
+            print(f"Job {job_id}: Low text density detected. Triggering FFmpeg Vision Keyframe Extractor...")
+            keyframes = extract_video_keyframes(
+                video_path=str(download_result.video_path),
+                output_dir=frames_dir,
+                max_frames=10,
+                fps=0.33,
+            )
+            print(f"Job {job_id}: Extracted {len(keyframes)} keyframes for GPT-5.4 mini Vision analysis.")
+
+        # 5. Extract WorkoutProgram with GPT-5.4 mini
         program = extract_workout_program(
             transcript=transcript,
             caption=download_result.caption,
             uploader=download_result.uploader,
+            image_paths=keyframes if keyframes else None,
             api_key=api_key,
             model=model,
         )
 
-        # 5. Save complete JSON to S3
+        # 6. Safety Net Fallback: If text mode yielded 0 exercises or low confidence, retry with Vision
+        total_exercises = count_program_exercises(program)
+        if (not keyframes) and (total_exercises == 0 or program.audit.confidence_score < 0.5) and download_result.video_path:
+            print(f"Job {job_id}: Text mode yielded {total_exercises} exercises. Executing 2nd Safety Net Vision Fallback...")
+            keyframes = extract_video_keyframes(
+                video_path=str(download_result.video_path),
+                output_dir=frames_dir,
+                max_frames=10,
+                fps=0.33,
+            )
+            if keyframes:
+                program = extract_workout_program(
+                    transcript=transcript,
+                    caption=download_result.caption,
+                    uploader=download_result.uploader,
+                    image_paths=keyframes,
+                    api_key=api_key,
+                    model=model,
+                )
+
+        # 7. Save complete JSON to S3
         s3_program_uri = None
         if bucket_name:
             try:
@@ -61,6 +111,7 @@ def process_single_job(job_id: str, url: str, reel_id: str) -> None:
                     "uploader": download_result.uploader,
                     "caption": download_result.caption,
                     "transcript": transcript,
+                    "vision_frames_used": len(keyframes),
                     "workout_program": program.model_dump(),
                 }
                 s3.put_object(
@@ -73,7 +124,7 @@ def process_single_job(job_id: str, url: str, reel_id: str) -> None:
             except Exception as s3_err:
                 print(f"Warning: Failed to upload program JSON to S3: {s3_err}")
 
-        # 6. Save WorkoutProgram to DynamoDB
+        # 8. Save WorkoutProgram to DynamoDB
         db.save_workout_program(
             program_dict=program.model_dump(),
             reel_id=reel_id,
@@ -81,7 +132,7 @@ def process_single_job(job_id: str, url: str, reel_id: str) -> None:
             s3_uri=s3_program_uri,
         )
 
-        # 7. Update Job Status to COMPLETED
+        # 9. Update Job Status to COMPLETED
         db.update_job_status(
             job_id=job_id,
             status="COMPLETED",
@@ -99,6 +150,14 @@ def process_single_job(job_id: str, url: str, reel_id: str) -> None:
             error=error_msg,
         )
         raise e
+
+    finally:
+        # 10. Clean up temporary files in /tmp/
+        try:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            shutil.rmtree(frames_dir, ignore_errors=True)
+        except Exception:
+            pass
 
 
 def handler(event: Dict[str, Any], context: Any) -> None:
@@ -121,5 +180,4 @@ def handler(event: Dict[str, Any], context: Any) -> None:
 
         except Exception as err:
             print(f"Error handling SQS record: {err}")
-            # Re-raising allows SQS retry & Dead Letter Queue (DLQ) if persistent
             raise err
