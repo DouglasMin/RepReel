@@ -58,7 +58,9 @@ Every request from the iOS App and Share Extension must include:
     "success": true,
     "job_id": "job_a1b2c3d4e5f6",
     "reel_id": "dQw4w9WgXcQ",
+    "platform": "YOUTUBE_SHORTS",
     "status": "PROCESSING",
+    "message": "Youtube Shorts analysis job initiated successfully.",
     "status_url": "/jobs/job_a1b2c3d4e5f6"
   }
   ```
