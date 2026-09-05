@@ -37,6 +37,14 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-northeast-2
 
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push Docker image to Amazon ECR
+        run: |
+          docker build --platform linux/amd64 -t 612529367436.dkr.ecr.ap-northeast-2.amazonaws.com/repreel-backend:latest .
+          docker push 612529367436.dkr.ecr.ap-northeast-2.amazonaws.com/repreel-backend:latest
+
       - name: Install Serverless Framework v3
         run: npm install -g serverless@3
 
@@ -47,3 +55,11 @@ jobs:
           ALLOWED_USER_EMAILS: ${{ secrets.ALLOWED_USER_EMAILS }}
         run: |
           serverless deploy --stage dev
+
+      - name: Force Lambda functions to update to latest container image
+        run: |
+          FUNCTIONS=$(aws lambda list-functions --query "Functions[?starts_with(FunctionName, 'instagram-reels-workout-dev-')].FunctionName" --output text)
+          for fn in $FUNCTIONS; do
+            echo "Updating image for $fn..."
+            aws lambda update-function-code --function-name "$fn" --image-uri 612529367436.dkr.ecr.ap-northeast-2.amazonaws.com/repreel-backend:latest || true
+          done
