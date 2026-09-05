@@ -225,3 +225,119 @@ def list_sessions(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "headers": {"Content-Type": "application/json"},
             "body": json.dumps({"error": str(e)}),
         }
+
+
+def delete_session(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """
+    DELETE /sessions/{session_id}
+    Permanently deletes a completed workout session log.
+    """
+    headers = event.get("headers") or {}
+    is_auth, auth_err = verify_request_authorization(headers)
+    if not is_auth:
+        return {
+            "statusCode": 403,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": "Forbidden", "message": auth_err}),
+        }
+
+    user_id = (
+        headers.get("x-user-email")
+        or headers.get("x-user-id")
+        or "default_user"
+    )
+
+    path_params = event.get("pathParameters") or {}
+    session_id = path_params.get("session_id")
+    if not session_id:
+        return {
+            "statusCode": 400,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": "Missing required path parameter 'session_id'"}),
+        }
+
+    try:
+        deleted = db.delete_workout_session(user_id=user_id, session_id=session_id)
+        if not deleted:
+            return {
+                "statusCode": 404,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({"error": "Not Found", "message": f"Session '{session_id}' not found."}),
+            }
+
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({
+                "success": True,
+                "message": "Session deleted successfully",
+            }),
+        }
+    except Exception as e:
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": str(e)}),
+        }
+
+
+def update_session(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """
+    PUT /sessions/{session_id}
+    Updates past workout session sets, reps, weights, duration, or notes.
+    Recalculates volume analytics and updates DynamoDB record.
+    """
+    headers = event.get("headers") or {}
+    is_auth, auth_err = verify_request_authorization(headers)
+    if not is_auth:
+        return {
+            "statusCode": 403,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": "Forbidden", "message": auth_err}),
+        }
+
+    user_id = (
+        headers.get("x-user-email")
+        or headers.get("x-user-id")
+        or "default_user"
+    )
+
+    path_params = event.get("pathParameters") or {}
+    session_id = path_params.get("session_id")
+    if not session_id:
+        return {
+            "statusCode": 400,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": "Missing required path parameter 'session_id'"}),
+        }
+
+    try:
+        body = json.loads(event.get("body") or "{}")
+        updated_session = db.update_workout_session(
+            user_id=user_id,
+            session_id=session_id,
+            session_data=body,
+        )
+
+        if not updated_session:
+            return {
+                "statusCode": 404,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({"error": "Not Found", "message": f"Session '{session_id}' not found."}),
+            }
+
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({
+                "success": True,
+                "session_id": session_id,
+                "session": updated_session,
+            }),
+        }
+    except Exception as e:
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": str(e)}),
+        }

@@ -333,6 +333,79 @@ class DynamoDBClient:
         
         return decimal_to_python(item)
 
+    def get_workout_session(self, user_id: str, session_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieves a completed workout session log by user_id and session_id.
+        """
+        res = self.table.get_item(Key={"PK": f"USER#{user_id}", "SK": f"SESSION#{session_id}"})
+        item = res.get("Item")
+        return decimal_to_python(item) if item else None
+
+    def delete_workout_session(self, user_id: str, session_id: str) -> bool:
+        """
+        Permanently deletes a completed workout session log.
+        """
+        existing = self.table.get_item(Key={"PK": f"USER#{user_id}", "SK": f"SESSION#{session_id}"})
+        if not existing.get("Item"):
+            return False
+        self.table.delete_item(Key={"PK": f"USER#{user_id}", "SK": f"SESSION#{session_id}"})
+        return True
+
+    def update_workout_session(
+        self,
+        user_id: str,
+        session_id: str,
+        session_data: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Updates a completed workout session log, recalculating Planfit-style volume analytics.
+        """
+        existing = self.get_workout_session(user_id=user_id, session_id=session_id)
+        if not existing:
+            return None
+
+        now = int(time.time())
+        analytics = calculate_session_volume_analytics(session_data)
+
+        program_id = session_data.get("program_id") or existing.get("program_id", "custom")
+        day_number = int(session_data.get("day_number", existing.get("day_number", 1)))
+        logged_at = session_data.get("logged_at", existing.get("logged_at", now))
+        duration_seconds = session_data.get("duration_seconds", existing.get("duration_seconds", 0))
+
+        update_expr = (
+            "SET session_data = :sdata, volume_analytics = :vanalytics, "
+            "program_id = :pid, day_number = :day_num, logged_at = :lat, "
+            "duration_seconds = :dur, updated_at = :uat, GSI1_PK = :gsi1_pk"
+        )
+        expr_values = {
+            ":sdata": float_to_decimal(session_data),
+            ":vanalytics": float_to_decimal(analytics),
+            ":pid": program_id,
+            ":day_num": day_number,
+            ":lat": logged_at,
+            ":dur": duration_seconds,
+            ":uat": now,
+            ":gsi1_pk": f"USER_PROGRAM#{user_id}#{program_id}",
+        }
+
+        self.table.update_item(
+            Key={"PK": f"USER#{user_id}", "SK": f"SESSION#{session_id}"},
+            UpdateExpression=update_expr,
+            ExpressionAttributeValues=expr_values,
+        )
+
+        updated_item = {
+            **existing,
+            "session_data": session_data,
+            "volume_analytics": analytics,
+            "program_id": program_id,
+            "day_number": day_number,
+            "logged_at": logged_at,
+            "duration_seconds": duration_seconds,
+            "updated_at": now,
+        }
+        return updated_item
+
     def list_workout_sessions(
         self,
         user_id: str,

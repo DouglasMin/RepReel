@@ -7,7 +7,7 @@ from openai import OpenAI
 from src.schema import WorkoutProgram
 
 SEQUENTIAL_MULTI_ROLE_SYSTEM_PROMPT = """You are an elite Strength & Conditioning Software Architect and Kinesiology Specialist.
-Your goal is to parse raw Instagram Reel content (audio transcription from speech, written post caption, and/or on-screen video frames) into a deeply structured, hierarchical, database-ready `WorkoutProgram`.
+Your goal is to parse raw short-form workout video content (Instagram Reels, YouTube Shorts: audio transcription from speech, written post caption, and/or on-screen video frames) into a deeply structured, hierarchical, database-ready `WorkoutProgram`.
 
 Follow this systematic 4-Stage Reasoning Process:
 
@@ -119,7 +119,7 @@ def extract_workout_program(
     client = OpenAI(api_key=api_key) if api_key else OpenAI()
     selected_model = model or os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
 
-    text_prompt = f"""Analyze this Instagram Reel workout routine:
+    text_prompt = f"""Analyze this workout routine video (Instagram Reel / YouTube Shorts):
 
 [Creator / Uploader]:
 {uploader or 'Unknown'}

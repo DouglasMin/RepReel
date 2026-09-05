@@ -26,7 +26,7 @@ Every request from the iOS App and Share Extension must include:
 
 | # | Method | Endpoint | Purpose | Lifecycle Stage |
 | :-: | :---: | :--- | :--- | :--- |
-| **1** | `POST` | `/reels` | Ingests Instagram Reel URL, starts background analysis | Ingestion |
+| **1** | `POST` | `/reels` | Ingests Instagram Reel / YouTube Shorts URL, starts background analysis | Ingestion |
 | **2** | `GET` | `/jobs/{job_id}` | Polls AI background processing status | Polling |
 | **3** | `GET` | `/programs/{program_id}` | Fetches full hierarchical workout program | Routine Detail |
 | **4** | `GET` | `/programs` | Lists all saved routines (filter by `?creator=...`) | Library |
@@ -41,21 +41,23 @@ Every request from the iOS App and Share Extension must include:
 | **13** | `DELETE`| `/sessions/active` | Discards or cancels unfinished workout draft | Live Tracking |
 | **14** | `POST` | `/sessions` | Logs completed workout session (auto-calculates total volume) | Workout Finish |
 | **15** | `GET` | `/sessions` | Lists past workout session logs & volume history | Analytics |
+| **16** | `DELETE`| `/sessions/{session_id}` | Permanently deletes a past workout session log | History Cleanup |
+| **17** | `PUT` | `/sessions/{session_id}` | Updates past workout session sets, reps, weights, notes | History Edit |
 
 ---
 
 ## 3. Detailed Endpoint Specs
 
-### 1. Ingest Instagram Reel (Asynchronous)
+### 1. Ingest Video URL (Instagram Reel or YouTube Shorts, Asynchronous)
 * **Method**: `POST`
 * **Path**: `/reels`
-* **Request Body**: `{ "url": "https://www.instagram.com/reel/DccqEKJPPqR/" }`
+* **Request Body**: `{ "url": "https://www.instagram.com/reel/DccqEKJPPqR/" }` or `{ "url": "https://youtube.com/shorts/dQw4w9WgXcQ" }`
 * **Response (`202 Accepted`)**:
   ```json
   {
     "success": true,
     "job_id": "job_a1b2c3d4e5f6",
-    "reel_id": "DccqEKJPPqR",
+    "reel_id": "dQw4w9WgXcQ",
     "status": "PROCESSING",
     "status_url": "/jobs/job_a1b2c3d4e5f6"
   }
@@ -310,3 +312,78 @@ Every request from the iOS App and Share Extension must include:
 * **Method**: `GET`
 * **Path**: `/sessions?program_id=che-dan-sil-ppl-routine-part2&limit=50`
 * **Response (`200 OK`)**: List of logged workout sessions with volume analytics.
+
+---
+
+### 16. Delete Past Workout Session Log
+* **Method**: `DELETE`
+* **Path**: `/sessions/{session_id}`
+* **Headers**: `x-user-email: dongik@example.com`, `x-app-secret: ...`
+* **Response (`200 OK`)**:
+  ```json
+  {
+    "success": true,
+    "message": "Session deleted successfully"
+  }
+  ```
+* **Response (`404 Not Found`)**:
+  ```json
+  {
+    "error": "Not Found",
+    "message": "Session 'session_123' not found."
+  }
+  ```
+
+---
+
+### 17. Update Past Workout Session Log
+* **Method**: `PUT`
+* **Path**: `/sessions/{session_id}`
+* **Headers**: `x-user-email: dongik@example.com`, `x-app-secret: ...`
+* **Request Body**:
+  ```json
+  {
+    "program_id": "che-dan-sil-ppl-routine-part2",
+    "day_number": 1,
+    "logged_at": 1771982600,
+    "duration_seconds": 3600,
+    "session_notes": "Great chest pump, increased weight on set 2.",
+    "completed_exercises": [
+      {
+        "exercise_id": "bench_press",
+        "exercise_name": "바벨 벤치프레스",
+        "sets": [
+          {
+            "set_number": 1,
+            "weight_kg": 80.0,
+            "reps": 10,
+            "rpe": 8.0,
+            "completed": true
+          }
+        ]
+      }
+    ]
+  }
+  ```
+* **Response (`200 OK`)**:
+  ```json
+  {
+    "success": true,
+    "session_id": "session_123",
+    "session": {
+      "session_id": "session_123",
+      "program_id": "che-dan-sil-ppl-routine-part2",
+      "day_number": 1,
+      "logged_at": 1771982600,
+      "duration_seconds": 3600,
+      "session_notes": "Great chest pump, increased weight on set 2.",
+      "completed_exercises": [ ... ],
+      "volume_analytics": {
+        "total_volume_kg": 800.0,
+        "total_sets_completed": 1,
+        "total_reps_completed": 10,
+        "exercise_breakdown": [ ... ]
+      }
+    }
+  }
+  ```

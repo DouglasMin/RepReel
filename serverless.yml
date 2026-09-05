@@ -254,6 +254,32 @@ functions:
           path: /sessions
           method: get
 
+  # 17. Delete Workout Session Log (DELETE /sessions/{session_id})
+  deleteSession:
+    image:
+      uri: 612529367436.dkr.ecr.ap-northeast-2.amazonaws.com/repreel-backend:latest
+      command: ["src.handlers.sessions.delete_session"]
+    description: Permanently delete a past workout session log
+    timeout: 10
+    memorySize: 256
+    events:
+      - httpApi:
+          path: /sessions/{session_id}
+          method: delete
+
+  # 18. Update Workout Session Log (PUT /sessions/{session_id})
+  updateSession:
+    image:
+      uri: 612529367436.dkr.ecr.ap-northeast-2.amazonaws.com/repreel-backend:latest
+      command: ["src.handlers.sessions.update_session"]
+    description: Update past workout session sets, reps, weights, duration, or notes
+    timeout: 10
+    memorySize: 256
+    events:
+      - httpApi:
+          path: /sessions/{session_id}
+          method: put
+
 resources:
   Resources:
     # DynamoDB Single Table

@@ -38,6 +38,68 @@ def test_dynamodb_float_conversion():
     assert restored["nested"]["rpe"] == 8.5
 
 
+def test_db_session_crud_operations():
+    from src.db.client import DynamoDBClient
+    client = DynamoDBClient(table_name="test-table")
+    mock_table = MagicMock()
+    client.table = mock_table
+
+    # Test get_workout_session
+    mock_table.get_item.return_value = {
+        "Item": {
+            "PK": "USER#me@example.com",
+            "SK": "SESSION#session_123",
+            "session_id": "session_123",
+            "program_id": "prog_123",
+            "day_number": 1,
+            "duration_seconds": 3600,
+        }
+    }
+    session = client.get_workout_session("me@example.com", "session_123")
+    assert session is not None
+    assert session["session_id"] == "session_123"
+
+    # Test delete_workout_session (exists)
+    mock_table.get_item.return_value = {"Item": {"PK": "USER#me@example.com", "SK": "SESSION#session_123"}}
+    assert client.delete_workout_session("me@example.com", "session_123") is True
+    mock_table.delete_item.assert_called_once_with(Key={"PK": "USER#me@example.com", "SK": "SESSION#session_123"})
+
+    # Test delete_workout_session (not found)
+    mock_table.get_item.return_value = {}
+    assert client.delete_workout_session("me@example.com", "session_nonexistent") is False
+
+    # Test update_workout_session
+    mock_table.get_item.return_value = {
+        "Item": {
+            "PK": "USER#me@example.com",
+            "SK": "SESSION#session_123",
+            "session_id": "session_123",
+            "program_id": "prog_123",
+            "day_number": 1,
+        }
+    }
+    updated = client.update_workout_session(
+        user_id="me@example.com",
+        session_id="session_123",
+        session_data={
+            "program_id": "prog_123",
+            "day_number": 1,
+            "duration_seconds": 4000,
+            "completed_exercises": [
+                {
+                    "exercise_id": "bench_press",
+                    "exercise_name": "Bench Press",
+                    "sets": [{"set_number": 1, "weight_kg": 100.0, "reps": 5, "completed": True}],
+                }
+            ],
+        },
+    )
+    assert updated is not None
+    assert updated["duration_seconds"] == 4000
+    assert updated["volume_analytics"]["total_volume_kg"] == 500.0
+    mock_table.update_item.assert_called_once()
+
+
 def test_schema_instantiation():
     program = WorkoutProgram(
         program_id="test-program-1",
@@ -369,6 +431,94 @@ def test_delete_active_session_handler(mock_del):
     assert body["success"] is True
 
 
+@patch("src.handlers.sessions.db.delete_workout_session")
+def test_delete_session_handler_success(mock_delete):
+    mock_delete.return_value = True
+    event = {
+        "headers": {"x-user-email": "me@example.com"},
+        "pathParameters": {"session_id": "session_123"},
+    }
+    response = sessions.delete_session(event, None)
+    assert response["statusCode"] == 200
+    body = json.loads(response["body"])
+    assert body["success"] is True
+    assert body["message"] == "Session deleted successfully"
+
+
+@patch("src.handlers.sessions.db.delete_workout_session")
+def test_delete_session_handler_not_found(mock_delete):
+    mock_delete.return_value = False
+    event = {
+        "headers": {"x-user-email": "me@example.com"},
+        "pathParameters": {"session_id": "session_nonexistent"},
+    }
+    response = sessions.delete_session(event, None)
+    assert response["statusCode"] == 404
+    body = json.loads(response["body"])
+    assert body["error"] == "Not Found"
+
+
+def test_delete_session_handler_missing_id():
+    event = {
+        "headers": {"x-user-email": "me@example.com"},
+        "pathParameters": {},
+    }
+    response = sessions.delete_session(event, None)
+    assert response["statusCode"] == 400
+
+
+@patch("src.handlers.sessions.db.update_workout_session")
+def test_update_session_handler_success(mock_update):
+    mock_update.return_value = {
+        "session_id": "session_123",
+        "program_id": "prog_123",
+        "volume_analytics": {"total_volume_kg": 800.0},
+    }
+    event = {
+        "headers": {"x-user-email": "me@example.com"},
+        "pathParameters": {"session_id": "session_123"},
+        "body": json.dumps({
+            "program_id": "prog_123",
+            "completed_exercises": [
+                {
+                    "exercise_id": "bench",
+                    "sets": [{"weight_kg": 80.0, "reps": 10, "completed": True}],
+                }
+            ],
+        }),
+    }
+    response = sessions.update_session(event, None)
+    assert response["statusCode"] == 200
+    body = json.loads(response["body"])
+    assert body["success"] is True
+    assert body["session_id"] == "session_123"
+    assert body["session"]["volume_analytics"]["total_volume_kg"] == 800.0
+
+
+@patch("src.handlers.sessions.db.update_workout_session")
+def test_update_session_handler_not_found(mock_update):
+    mock_update.return_value = None
+    event = {
+        "headers": {"x-user-email": "me@example.com"},
+        "pathParameters": {"session_id": "session_nonexistent"},
+        "body": json.dumps({"program_id": "prog_123"}),
+    }
+    response = sessions.update_session(event, None)
+    assert response["statusCode"] == 404
+    body = json.loads(response["body"])
+    assert body["error"] == "Not Found"
+
+
+def test_update_session_handler_missing_id():
+    event = {
+        "headers": {"x-user-email": "me@example.com"},
+        "pathParameters": {},
+        "body": json.dumps({"program_id": "prog_123"}),
+    }
+    response = sessions.update_session(event, None)
+    assert response["statusCode"] == 400
+
+
 def test_volume_analytics_calculation():
     from src.db.client import calculate_session_volume_analytics
     sample_session = {
@@ -414,3 +564,70 @@ def test_should_use_vision_pipeline_caption_fallback():
     transcript = "" # No voiceover
     caption = "오늘의 하체 루틴: 1. 스쿼트 5세트 8회, 2. 레그프레스 4세트 12회, 3. 레그익스텐션 3세트 15회"
     assert should_use_vision_pipeline(transcript, caption) is False
+
+
+def test_extract_video_id_instagram():
+    from src.downloader import extract_reel_id
+    assert extract_reel_id("https://www.instagram.com/reel/DccqEKJPPqR/") == "DccqEKJPPqR"
+    assert extract_reel_id("https://instagram.com/p/DccqEKJPPqR") == "DccqEKJPPqR"
+    assert extract_reel_id("https://instagr.am/reels/DccqEKJPPqR/?igsh=abc") == "DccqEKJPPqR"
+
+
+def test_extract_video_id_youtube():
+    from src.downloader import extract_reel_id, extract_video_id
+    assert extract_reel_id("https://www.youtube.com/shorts/dQw4w9WgXcQ") == "dQw4w9WgXcQ"
+    assert extract_reel_id("https://youtube.com/shorts/dQw4w9WgXcQ?feature=share") == "dQw4w9WgXcQ"
+    assert extract_reel_id("https://youtu.be/dQw4w9WgXcQ?si=123xyz") == "dQw4w9WgXcQ"
+    assert extract_reel_id("https://www.youtube.com/watch?v=dQw4w9WgXcQ") == "dQw4w9WgXcQ"
+    assert extract_reel_id("https://m.youtube.com/shorts/dQw4w9WgXcQ") == "dQw4w9WgXcQ"
+    assert extract_video_id("https://www.youtube.com/shorts/dQw4w9WgXcQ") == "dQw4w9WgXcQ"
+
+
+def test_is_supported_video_url():
+    from src.downloader import is_supported_video_url
+    assert is_supported_video_url("https://www.instagram.com/reel/DccqEKJPPqR/") is True
+    assert is_supported_video_url("https://youtube.com/shorts/dQw4w9WgXcQ") is True
+    assert is_supported_video_url("https://youtu.be/dQw4w9WgXcQ") is True
+    assert is_supported_video_url("https://m.youtube.com/shorts/dQw4w9WgXcQ") is True
+    assert is_supported_video_url("https://tiktok.com/@user/video/123") is False
+    assert is_supported_video_url("https://random-site.com/video") is False
+    assert is_supported_video_url("") is False
+    assert is_supported_video_url(None) is False
+
+
+@patch("src.handlers.ingest.db.create_job")
+@patch("src.handlers.ingest.sqs.send_message")
+def test_ingest_handler_youtube_shorts_success(mock_sqs, mock_create_job):
+    mock_create_job.return_value = {"job_id": "job_yt_123", "status": "PROCESSING"}
+    mock_sqs.return_value = {"MessageId": "msg_yt_123"}
+
+    event = {
+        "headers": {},
+        "body": json.dumps({"url": "https://youtube.com/shorts/dQw4w9WgXcQ?feature=share"}),
+    }
+
+    response = ingest.handler(event, None)
+    assert response["statusCode"] == 202
+    body = json.loads(response["body"])
+    assert body["success"] is True
+    assert body["status"] == "PROCESSING"
+    assert body["reel_id"] == "dQw4w9WgXcQ"
+    assert body["job_id"].startswith("job_")
+
+
+@patch("requests.get")
+def test_fetch_oembed_caption_youtube(mock_requests_get):
+    from src.downloader import fetch_oembed_caption
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "title": "Full Body Dumbbell Workout",
+        "author_name": "FitnessCoach",
+    }
+    mock_requests_get.return_value = mock_response
+
+    oembed = fetch_oembed_caption("https://www.youtube.com/shorts/dQw4w9WgXcQ")
+    assert oembed is not None
+    assert oembed["title"] == "Full Body Dumbbell Workout"
+    assert oembed["author_name"] == "FitnessCoach"
+

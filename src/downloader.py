@@ -44,25 +44,67 @@ class ReelDownloadResult:
         }
 
 
+def is_supported_video_url(url: str) -> bool:
+    """Checks if the URL is a supported Instagram or YouTube video/shorts URL."""
+    if not url or not isinstance(url, str):
+        return False
+    url_lower = url.lower()
+    return any(domain in url_lower for domain in ["instagram.com", "instagr.am", "youtube.com", "youtu.be"])
+
+
 def extract_reel_id(url: str) -> str:
-    """Extract the shortcode or ID from Instagram Reel URL."""
-    match = re.search(r"/(?:reel|p|reels)/([A-Za-z0-9_-]+)", url)
-    if match:
-        return match.group(1)
+    """Extract the shortcode or ID from Instagram Reel or YouTube Shorts URL."""
+    # 1. Instagram pattern: /(reel|p|reels)/<id>
+    ig_match = re.search(r"/(?:reel|p|reels)/([A-Za-z0-9_-]+)", url)
+    if ig_match:
+        return ig_match.group(1)
+
+    # 2. YouTube Shorts pattern: /shorts/<id>
+    yt_shorts_match = re.search(r"/shorts/([A-Za-z0-9_-]+)", url)
+    if yt_shorts_match:
+        return yt_shorts_match.group(1)
+
+    # 3. YouTube youtu.be/<id>
+    yt_short_domain = re.search(r"youtu\.be/([A-Za-z0-9_-]+)", url)
+    if yt_short_domain:
+        return yt_short_domain.group(1)
+
+    # 4. YouTube watch?v=<id>
+    yt_watch_match = re.search(r"[?&]v=([A-Za-z0-9_-]+)", url)
+    if yt_watch_match:
+        return yt_watch_match.group(1)
+
+    # 5. YouTube embed or /v/<id>
+    yt_embed_match = re.search(r"/(?:embed|v)/([A-Za-z0-9_-]+)", url)
+    if yt_embed_match:
+        return yt_embed_match.group(1)
+
+    # 6. Fallback clean
     cleaned = re.sub(r"[^A-Za-z0-9_-]", "_", url.split("?")[0].rstrip("/").split("/")[-1])
-    return cleaned or "unknown_reel"
+    return cleaned or "unknown_video"
+
+
+# Alias for generalized video ID extraction
+extract_video_id = extract_reel_id
 
 
 def fetch_oembed_caption(url: str) -> Optional[Dict[str, Any]]:
-    """Fallback: Fetch oEmbed metadata from Instagram without downloading video."""
+    """Fallback: Fetch oEmbed metadata from Instagram or YouTube without downloading video."""
     try:
-        oembed_url = f"https://api.instagram.com/oembed/?url={url}"
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        res = requests.get(oembed_url, headers=headers, timeout=10)
-        if res.status_code == 200:
-            return res.json()
+        url_lower = url.lower()
+        if "instagram.com" in url_lower or "instagr.am" in url_lower:
+            oembed_url = f"https://api.instagram.com/oembed/?url={url}"
+            res = requests.get(oembed_url, headers=headers, timeout=10)
+            if res.status_code == 200:
+                return res.json()
+        elif "youtube.com" in url_lower or "youtu.be" in url_lower:
+            oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
+            res = requests.get(oembed_url, headers=headers, timeout=10)
+            if res.status_code == 200:
+                return res.json()
     except Exception:
         pass
     return None
@@ -113,7 +155,7 @@ def extract_video_keyframes(
 
 def download_reel(url: str, output_dir: str = "/tmp/downloads") -> ReelDownloadResult:
     """
-    Downloads an Instagram Reel, preserving video (.mp4) and extracting audio (.mp3).
+    Downloads an Instagram Reel or YouTube Shorts video, preserving video (.mp4/.webm) and extracting audio (.mp3).
     Extracts caption/description and metadata.
     """
     download_dir = Path(output_dir)
@@ -124,7 +166,7 @@ def download_reel(url: str, output_dir: str = "/tmp/downloads") -> ReelDownloadR
     expected_audio_path = download_dir / f"{reel_id}.mp3"
 
     ydl_opts = {
-        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best",
         "outtmpl": video_template,
         "quiet": True,
         "no_warnings": True,
@@ -201,3 +243,7 @@ def download_reel(url: str, output_dir: str = "/tmp/downloads") -> ReelDownloadR
             download_success=False,
             error_message=f"Download failed ({error_msg}). Fallback caption obtained: {bool(caption)}",
         )
+
+
+# Alias for generalized video download
+download_video = download_reel

@@ -160,7 +160,7 @@ def analyze_reel(url: str, model: str = "o3-mini", output_dir: str = "output") -
         console=console,
     ) as progress:
         # Stage 1: Download & Ingestion
-        task1 = progress.add_task("[yellow]Stage 1/4: Ingesting Reel video/audio via yt-dlp...", total=None)
+        task1 = progress.add_task("[yellow]Stage 1/4: Ingesting video/audio via yt-dlp...", total=None)
         download_result = download_reel(url)
         progress.update(task1, description="[green]Stage 1/4: Ingestion complete!")
 
@@ -212,13 +212,17 @@ def analyze_reel(url: str, model: str = "o3-mini", output_dir: str = "output") -
     return program
 
 
+# Alias for generalized video analysis
+analyze_video = analyze_reel
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Hierarchical Instagram Reels Workout Extraction Pipeline")
+    parser = argparse.ArgumentParser(description="Hierarchical Instagram Reels & YouTube Shorts Workout Extraction Pipeline")
     parser.add_argument(
         "url",
         nargs="?",
         default="https://www.instagram.com/reel/DccqEKJPPqR/",
-        help="Instagram Reel URL",
+        help="Instagram Reel or YouTube Shorts URL",
     )
     parser.add_argument(
         "--model",

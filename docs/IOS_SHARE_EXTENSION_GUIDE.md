@@ -1,8 +1,8 @@
 # iOS Share Extension Implementation Guide
 
-This guide provides the complete Swift implementation for the **Instagram Reels Workout App Share Extension**.
+This guide provides the complete Swift implementation for the **Workout App Share Extension** (supporting Instagram Reels & YouTube Shorts).
 
-When a user taps **Share $\rightarrow$ Workout App** inside the official Instagram app, this extension intercepts the Reel URL, calls the backend `POST /reels` endpoint, stores the `job_id` in the shared App Group, and dismisses smoothly in **< 300ms**.
+When a user taps **Share $\rightarrow$ Workout App** inside Instagram or YouTube, this extension intercepts the video URL, calls the backend `POST /reels` endpoint, stores the `job_id` in the shared App Group, and dismisses smoothly in **< 300ms**.
 
 ---
 
@@ -83,7 +83,7 @@ class ShareViewController: UIViewController {
     
     private let statusLabel: UILabel = {
         let label = UILabel()
-        label.text = "인스타그램 릴스 운동 분석 중..."
+        label.text = "운동 영상 AI 분석 요청 중..."
         label.font = UIFont.systemFont(ofSize: 15, weight: .semibold)
         label.textColor = .label
         label.textAlignment = .center
