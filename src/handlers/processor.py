@@ -3,9 +3,9 @@ import json
 import shutil
 import boto3
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
-from src.downloader import download_reel, extract_video_keyframes
+from src.downloader import download_reel, extract_video_keyframes, detect_video_platform
 from src.transcribe import transcribe_audio
 from src.extractor import extract_workout_program, should_use_vision_pipeline
 from src.db.client import DynamoDBClient
@@ -26,16 +26,18 @@ def count_program_exercises(program_obj: Any) -> int:
         return 0
 
 
-def process_single_job(job_id: str, url: str, reel_id: str) -> None:
+def process_single_job(job_id: str, url: str, reel_id: str, platform: Optional[str] = None) -> None:
     api_key = os.getenv("OPENAI_API_KEY")
     bucket_name = os.getenv("BUCKET_NAME")
     model = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+
+    resolved_platform = platform or detect_video_platform(url)
 
     tmp_dir = f"/tmp/downloads_{job_id}"
     frames_dir = f"/tmp/frames_{job_id}"
 
     try:
-        # 1. Download Reel video (.mp4), audio (.mp3), and post caption
+        # 1. Download video (.mp4/.webm), audio (.mp3), and metadata
         download_result = download_reel(url, output_dir=tmp_dir)
 
         # 2. Upload audio to S3 if available
@@ -56,18 +58,30 @@ def process_single_job(job_id: str, url: str, reel_id: str) -> None:
                 print(f"Whisper STT failed ({stt_err}), continuing with caption/vision...")
 
         # 4. Smart Routing Decision: Text Mode vs Vision Mode
-        use_vision = should_use_vision_pipeline(transcript=transcript, caption=download_result.caption)
+        # YouTube Shorts are visual-first with on-screen text overlays; force Vision mode
+        if resolved_platform == "YOUTUBE_SHORTS":
+            use_vision = True
+            print(f"Job {job_id}: YouTube Shorts detected. Activating Vision Mode for on-screen title card analysis.")
+        else:
+            use_vision = should_use_vision_pipeline(transcript=transcript, caption=download_result.caption)
+
         keyframes: List[str] = []
 
         if use_vision and download_result.video_path:
-            print(f"Job {job_id}: Low text density detected. Triggering FFmpeg Vision Keyframe Extractor...")
+            # YouTube Shorts uses high-resolution (768px width) and up to 16 frames to capture quick 2-second title cards
+            max_frames = 16 if resolved_platform == "YOUTUBE_SHORTS" else 10
+            fps = 0.5 if resolved_platform == "YOUTUBE_SHORTS" else 0.33
+            frame_width = 768 if resolved_platform == "YOUTUBE_SHORTS" else 512
+
+            print(f"Job {job_id}: Extracting up to {max_frames} keyframes ({frame_width}px, fps={fps})...")
             keyframes = extract_video_keyframes(
                 video_path=str(download_result.video_path),
                 output_dir=frames_dir,
-                max_frames=10,
-                fps=0.33,
+                max_frames=max_frames,
+                fps=fps,
+                width=frame_width,
             )
-            print(f"Job {job_id}: Extracted {len(keyframes)} keyframes for GPT-5.4 mini Vision analysis.")
+            print(f"Job {job_id}: Extracted {len(keyframes)} keyframes for multimodal analysis.")
 
         # 5. Extract WorkoutProgram with GPT-5.4 mini
         program = extract_workout_program(
@@ -77,6 +91,7 @@ def process_single_job(job_id: str, url: str, reel_id: str) -> None:
             image_paths=keyframes if keyframes else None,
             api_key=api_key,
             model=model,
+            platform=resolved_platform,
         )
 
         # 6. Safety Net Fallback: If text mode yielded 0 exercises or low confidence, retry with Vision
@@ -86,8 +101,9 @@ def process_single_job(job_id: str, url: str, reel_id: str) -> None:
             keyframes = extract_video_keyframes(
                 video_path=str(download_result.video_path),
                 output_dir=frames_dir,
-                max_frames=10,
-                fps=0.33,
+                max_frames=16,
+                fps=0.5,
+                width=768,
             )
             if keyframes:
                 program = extract_workout_program(
@@ -97,6 +113,7 @@ def process_single_job(job_id: str, url: str, reel_id: str) -> None:
                     image_paths=keyframes,
                     api_key=api_key,
                     model=model,
+                    platform=resolved_platform,
                 )
 
         # 7. Save complete JSON to S3
@@ -107,6 +124,7 @@ def process_single_job(job_id: str, url: str, reel_id: str) -> None:
                 s3_data = {
                     "url": url,
                     "reel_id": reel_id,
+                    "platform": resolved_platform,
                     "model_used": model,
                     "uploader": download_result.uploader,
                     "caption": download_result.caption,
@@ -130,6 +148,7 @@ def process_single_job(job_id: str, url: str, reel_id: str) -> None:
             reel_id=reel_id,
             uploader=download_result.uploader,
             s3_uri=s3_program_uri,
+            platform=resolved_platform,
         )
 
         # 9. Update Job Status to COMPLETED
@@ -174,9 +193,10 @@ def handler(event: Dict[str, Any], context: Any) -> None:
             job_id = body["job_id"]
             url = body["url"]
             reel_id = body["reel_id"]
+            platform = body.get("platform")
 
-            print(f"Starting processing for Job: {job_id} ({url})")
-            process_single_job(job_id=job_id, url=url, reel_id=reel_id)
+            print(f"Starting processing for Job: {job_id} ({url}, Platform: {platform})")
+            process_single_job(job_id=job_id, url=url, reel_id=reel_id, platform=platform)
 
         except Exception as err:
             print(f"Error handling SQS record: {err}")

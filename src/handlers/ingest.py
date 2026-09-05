@@ -4,7 +4,7 @@ import uuid
 import boto3
 from typing import Dict, Any
 
-from src.downloader import extract_reel_id, is_supported_video_url
+from src.downloader import extract_reel_id, is_supported_video_url, detect_video_platform
 from src.db.client import DynamoDBClient
 from src.auth.guard import verify_request_authorization
 
@@ -46,19 +46,21 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 }),
             }
 
+        platform = detect_video_platform(url)
         reel_id = extract_reel_id(url)
         job_id = f"job_{uuid.uuid4().hex[:12]}"
 
-        # 3. Create Job in DynamoDB
-        job = db.create_job(job_id=job_id, url=url, reel_id=reel_id)
+        # 3. Create Job in DynamoDB with platform tracking
+        job = db.create_job(job_id=job_id, url=url, reel_id=reel_id, platform=platform)
 
-        # 4. Push message to SQS Queue
+        # 4. Push message to SQS Queue with platform metadata
         queue_url = os.getenv("QUEUE_URL")
         if queue_url:
             message_body = {
                 "job_id": job_id,
                 "url": url,
                 "reel_id": reel_id,
+                "platform": platform,
             }
             sqs.send_message(
                 QueueUrl=queue_url,
@@ -70,8 +72,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "success": True,
             "job_id": job_id,
             "reel_id": reel_id,
+            "platform": platform,
             "status": "PROCESSING",
-            "message": "Workout video analysis job initiated successfully.",
+            "message": f"{platform.replace('_', ' ').title()} analysis job initiated successfully.",
             "status_url": f"/jobs/{job_id}",
         }
 

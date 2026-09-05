@@ -50,6 +50,14 @@ STAGE 4: QUALITY AUDIT & MOBILE ACTION ITEM GENERATION
 • Generate concrete `user_action_items` for the mobile app setup screen.
 • Formulate clear, concise coaching cues and common mistakes to avoid for each exercise.
 
+─────────────────────────────────────────────────────────────
+SPECIAL INSTRUCTIONS FOR YOUTUBE SHORTS & TUTORIAL VIDEOS
+─────────────────────────────────────────────────────────────
+• YouTube Shorts are visual-first. On-screen text cards, Korean title overlays, and movement demonstrations take absolute precedence over any video description text.
+• Ignore description promotional content (e.g., affiliate discount codes, sponsor ads, meal prep links).
+• Single-Exercise Tutorials: If the video teaches a single exercise (e.g., form tutorial for Lateral Raise), generate a focused WorkoutProgram with Day 1 containing that exact exercise and comprehensive form cues. DO NOT invent or hallucinate unrelated exercises to pad the program.
+• Multi-Exercise Beginner Routines: If 2-4 exercises are demonstrated in the Short, include only those exact exercises in the order demonstrated.
+
 Strictly adhere to the `WorkoutProgram` JSON Schema.
 """
 
@@ -111,6 +119,8 @@ def extract_workout_program(
     image_paths: Optional[List[str]] = None,
     api_key: Optional[str] = None,
     model: Optional[str] = None,
+    platform: str = "INSTAGRAM_REEL",
+    vision_detail: Optional[str] = None,
 ) -> WorkoutProgram:
     """
     Extracts a fully hierarchical WorkoutProgram from transcript, caption, and optional video frames
@@ -119,7 +129,13 @@ def extract_workout_program(
     client = OpenAI(api_key=api_key) if api_key else OpenAI()
     selected_model = model or os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
 
-    text_prompt = f"""Analyze this workout routine video (Instagram Reel / YouTube Shorts):
+    # YouTube Shorts uses high detail for accurate Korean subtitle OCR, while Instagram defaults to cost-efficient low detail
+    resolved_vision_detail = vision_detail or ("high" if platform == "YOUTUBE_SHORTS" else "low")
+
+    text_prompt = f"""Analyze this workout routine video ({platform}):
+
+[Source Platform]:
+{platform}
 
 [Creator / Uploader]:
 {uploader or 'Unknown'}
@@ -132,8 +148,9 @@ def extract_workout_program(
 
 Instructions:
 1. If on-screen video frames are attached, carefully read all exercise names, sets, reps, cards, and movement form cues shown in the frames.
-2. Cross-reference audio, caption, and video frames to build the complete workout split.
-3. Execute the 4-Stage Reasoning Process and return the complete hierarchical WorkoutProgram.
+2. For YouTube Shorts, prioritize on-screen text overlays and demonstrated movements; ignore external promotional or sponsor links in the description.
+3. Cross-reference audio, caption, and video frames to build the complete workout split.
+4. Execute the 4-Stage Reasoning Process and return the complete hierarchical WorkoutProgram.
 """
 
     if image_paths and len(image_paths) > 0:
@@ -148,7 +165,7 @@ Instructions:
                     "type": "image_url",
                     "image_url": {
                         "url": base64_url,
-                        "detail": "low",  # Optimal 85-token cost efficiency
+                        "detail": resolved_vision_detail,
                     },
                 })
         messages = [

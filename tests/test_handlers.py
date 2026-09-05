@@ -3,6 +3,7 @@ import pytest
 import os
 from unittest.mock import MagicMock, patch
 from decimal import Decimal
+from pathlib import Path
 
 from src.schema import (
     WorkoutProgram,
@@ -204,6 +205,7 @@ def test_ingest_handler_success(mock_sqs, mock_create_job):
     assert body["success"] is True
     assert body["status"] == "PROCESSING"
     assert body["reel_id"] == "DccqEKJPPqR"
+    assert body["platform"] == "INSTAGRAM_REEL"
     assert "job_id" in body
 
 
@@ -612,7 +614,92 @@ def test_ingest_handler_youtube_shorts_success(mock_sqs, mock_create_job):
     assert body["success"] is True
     assert body["status"] == "PROCESSING"
     assert body["reel_id"] == "dQw4w9WgXcQ"
+    assert body["platform"] == "YOUTUBE_SHORTS"
     assert body["job_id"].startswith("job_")
+
+
+def test_detect_video_platform():
+    from src.downloader import detect_video_platform
+
+    # YouTube Shorts
+    assert detect_video_platform("https://youtube.com/shorts/dQw4w9WgXcQ") == "YOUTUBE_SHORTS"
+    assert detect_video_platform("https://www.youtube.com/shorts/dQw4w9WgXcQ?feature=share") == "YOUTUBE_SHORTS"
+    assert detect_video_platform("https://m.youtube.com/shorts/dQw4w9WgXcQ") == "YOUTUBE_SHORTS"
+
+    # YouTube Standard Video
+    assert detect_video_platform("https://www.youtube.com/watch?v=dQw4w9WgXcQ") == "YOUTUBE_VIDEO"
+    assert detect_video_platform("https://youtu.be/dQw4w9WgXcQ?t=10") == "YOUTUBE_VIDEO"
+
+    # Instagram Reels / Posts
+    assert detect_video_platform("https://www.instagram.com/reel/DccqEKJPPqR/") == "INSTAGRAM_REEL"
+    assert detect_video_platform("https://www.instagram.com/reels/DccqEKJPPqR/") == "INSTAGRAM_REEL"
+    assert detect_video_platform("https://www.instagram.com/p/DccqEKJPPqR/") == "INSTAGRAM_REEL"
+
+    # Unknown / Unsupported
+    assert detect_video_platform("https://tiktok.com/@user/video/123") == "UNKNOWN"
+    assert detect_video_platform("https://example.com/video.mp4") == "UNKNOWN"
+    assert detect_video_platform("") == "UNKNOWN"
+    assert detect_video_platform(None) == "UNKNOWN"
+
+
+@patch("src.handlers.processor.extract_workout_program")
+@patch("src.handlers.processor.extract_video_keyframes")
+@patch("src.handlers.processor.download_reel")
+@patch("src.handlers.processor.db")
+@patch("src.handlers.processor.s3")
+def test_processor_youtube_shorts_forces_vision(
+    mock_s3, mock_db, mock_download, mock_keyframes, mock_extractor
+):
+    from src.handlers.processor import process_single_job
+    from src.downloader import ReelDownloadResult
+
+    mock_download.return_value = ReelDownloadResult(
+        reel_id="dQw4w9WgXcQ",
+        title="Workout Short",
+        video_path=Path("/tmp/fake_short.mp4"),
+        audio_path=Path("/tmp/fake_short.mp3"),
+        caption="Check out my discount code at link in bio! #fitness #workout",
+        uploader="fitness_trainer",
+    )
+    mock_keyframes.return_value = ["/tmp/frame_01.jpg", "/tmp/frame_02.jpg"]
+
+    mock_program = MagicMock()
+    mock_program.program_id = "prog_123"
+    mock_program.days = [MagicMock()]
+    mock_program.days[0].exercise_groups = [MagicMock()]
+    mock_program.days[0].exercise_groups[0].exercises = [MagicMock()]
+    mock_program.audit = MagicMock(confidence_score=0.92)
+    mock_program.model_dump.return_value = {"program_id": "prog_123", "days": []}
+    mock_extractor.return_value = mock_program
+
+    # Process YouTube Shorts job
+    process_single_job(
+        job_id="job_yt_short_1",
+        url="https://www.youtube.com/shorts/dQw4w9WgXcQ",
+        reel_id="dQw4w9WgXcQ",
+        platform="YOUTUBE_SHORTS",
+    )
+
+    # 1. Verify Vision extraction was called with high-res parameters (768px width, 16 frames, 0.5 fps)
+    mock_keyframes.assert_called_once_with(
+        video_path="/tmp/fake_short.mp4",
+        output_dir="/tmp/frames_job_yt_short_1",
+        max_frames=16,
+        fps=0.5,
+        width=768,
+    )
+
+    # 2. Verify extract_workout_program was passed platform="YOUTUBE_SHORTS" and keyframes
+    mock_extractor.assert_called_once()
+    _, call_kwargs = mock_extractor.call_args
+    assert call_kwargs["platform"] == "YOUTUBE_SHORTS"
+    assert call_kwargs["image_paths"] == ["/tmp/frame_01.jpg", "/tmp/frame_02.jpg"]
+
+    # 3. Verify program saved to DynamoDB with platform="YOUTUBE_SHORTS"
+    mock_db.save_workout_program.assert_called_once()
+    _, save_kwargs = mock_db.save_workout_program.call_args
+    assert save_kwargs["platform"] == "YOUTUBE_SHORTS"
+    assert save_kwargs["reel_id"] == "dQw4w9WgXcQ"
 
 
 @patch("requests.get")

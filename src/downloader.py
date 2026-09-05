@@ -52,6 +52,26 @@ def is_supported_video_url(url: str) -> bool:
     return any(domain in url_lower for domain in ["instagram.com", "instagr.am", "youtube.com", "youtu.be"])
 
 
+def detect_video_platform(url: str) -> str:
+    """
+    Classifies the input URL into its platform type:
+    - YOUTUBE_SHORTS (Short-form YouTube video)
+    - YOUTUBE_VIDEO (Standard YouTube video)
+    - INSTAGRAM_REEL (Instagram Reel or Post video)
+    - UNKNOWN
+    """
+    if not url or not isinstance(url, str):
+        return "UNKNOWN"
+    url_lower = url.lower()
+    if "youtube.com" in url_lower or "youtu.be" in url_lower:
+        if "/shorts/" in url_lower or "feature=share" in url_lower:
+            return "YOUTUBE_SHORTS"
+        return "YOUTUBE_VIDEO"
+    elif "instagram.com" in url_lower or "instagr.am" in url_lower:
+        return "INSTAGRAM_REEL"
+    return "UNKNOWN"
+
+
 def extract_reel_id(url: str) -> str:
     """Extract the shortcode or ID from Instagram Reel or YouTube Shorts URL."""
     # 1. Instagram pattern: /(reel|p|reels)/<id>
@@ -115,10 +135,11 @@ def extract_video_keyframes(
     output_dir: Optional[str] = None,
     max_frames: int = 10,
     fps: float = 0.33,
+    width: int = 512,
 ) -> List[str]:
     """
     Extracts representative keyframes from video using FFmpeg for GPT-5.4 mini Vision analysis.
-    Resizes to 512px width for minimal token usage (~85 tokens/image).
+    Configurable width (e.g. 512 for standard, 768 for high-res Shorts OCR).
     """
     if not video_path or not os.path.exists(video_path):
         return []
@@ -132,8 +153,8 @@ def extract_video_keyframes(
         "ffmpeg",
         "-y",
         "-i", video_path,
-        "-vf", f"fps={fps},scale=512:-1",
-        "-q:v", "3",
+        "-vf", f"fps={fps},scale={width}:-1",
+        "-q:v", "2",
         output_pattern,
     ]
 

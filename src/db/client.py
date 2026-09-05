@@ -100,7 +100,7 @@ class DynamoDBClient:
     # -------------------------------------------------------------
     # JOB OPERATIONS
     # -------------------------------------------------------------
-    def create_job(self, job_id: str, url: str, reel_id: str) -> Dict[str, Any]:
+    def create_job(self, job_id: str, url: str, reel_id: str, platform: Optional[str] = None) -> Dict[str, Any]:
         now = int(time.time())
         item = {
             "PK": f"JOB#{job_id}",
@@ -109,6 +109,7 @@ class DynamoDBClient:
             "job_id": job_id,
             "url": url,
             "reel_id": reel_id,
+            "platform": platform or "UNKNOWN",
             "status": "PROCESSING",
             "created_at": now,
             "updated_at": now,
@@ -170,6 +171,7 @@ class DynamoDBClient:
         reel_id: str,
         uploader: Optional[str] = None,
         s3_uri: Optional[str] = None,
+        platform: Optional[str] = None,
     ) -> Dict[str, Any]:
         now = int(time.time())
         program_id = program_dict["program_id"]
@@ -181,6 +183,7 @@ class DynamoDBClient:
             "entity_type": "PROGRAM",
             "program_id": program_id,
             "reel_id": reel_id,
+            "platform": platform or "UNKNOWN",
             "creator": creator,
             "title": program_dict.get("title", "Workout Program"),
             "split_type": program_dict.get("split_type"),
