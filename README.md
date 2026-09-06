@@ -1,12 +1,13 @@
-# 🏋️‍♂️ RepReel — Instagram Reels to Structured AI Workout Routines
+# 🏋️‍♂️ RepReel — Instagram Reels & YouTube Shorts to Structured AI Workout Routines
 
 [![CI/CD Status](https://github.com/DouglasMin/RepReel/actions/workflows/deploy.yml/badge.svg)](https://github.com/DouglasMin/RepReel/actions)
 [![Python](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
 [![AWS](https://img.shields.io/badge/AWS-ECR%20%7C%20Lambda%20%7C%20DynamoDB%20%7C%20SQS-orange.svg)](https://aws.amazon.com/)
 [![OpenAI](https://img.shields.io/badge/OpenAI-GPT--5.4%20mini-green.svg)](https://openai.com/)
 [![Swift](https://img.shields.io/badge/Swift-6%20%7C%20SwiftUI-red.svg)](https://developer.apple.com/swift/)
+[![OpenAPI](https://img.shields.io/badge/OpenAPI-2.0%20(Swagger)-informational.svg)](docs/openapi_2.0.yaml)
 
-**RepReel** transforms short-form fitness videos (Instagram Reels, YouTube Shorts) into structured, actionable workout routines with progressive overload tracking, real-time set checklists, Planfit-style volume analytics, and intelligent 1-tap exercise substitutions.
+**RepReel** transforms short-form fitness videos (**Instagram Reels** and **YouTube Shorts**) into structured, actionable workout routines with progressive overload tracking, real-time set checklists, Planfit-style volume analytics, and intelligent 1-tap exercise substitutions.
 
 ---
 
@@ -15,16 +16,17 @@
 * **API Gateway Base URL**: `https://szcr4meit6.execute-api.ap-northeast-2.amazonaws.com`
 * **Region**: `ap-northeast-2` (Seoul)
 * **Architecture**: Container-based Serverless (`Amazon ECR` + `AWS Lambda` + `DynamoDB` + `SQS` + `S3`)
-* **AI Model**: `gpt-5.4-mini` (OpenAI Structured Outputs)
+* **AI Engine**: `gpt-5.4-mini` (OpenAI Structured Outputs) + High-Res OCR Vision Pipeline + Whisper STT
 
 ---
 
 ## 🚀 Key Features
 
 1. **⚡ 0.3s Share Extension Ingestion**:
-   * Intercepts Instagram share sheet in iOS, enqueues background processing job asynchronously via SQS.
-2. **🧠 High-Accuracy Sequential AI Extraction**:
-   * Uses Whisper STT + GPT-5.4 mini to normalize Korean gym slang (`아레베` $\rightarrow$ Side Lateral Raise) and generate multi-day split routines.
+   * Intercepts Instagram and YouTube Shorts share sheet in iOS, detects source platform (`INSTAGRAM_REEL`, `YOUTUBE_SHORTS`), and enqueues background processing job asynchronously via SQS.
+2. **🧠 Multi-Platform AI Extraction Pipeline**:
+   * **YouTube Shorts**: Vision-first High-Res OCR pipeline to read video title cards, exercise names, and rep numbers accurately without hallucinating voiceover ads or background chatter.
+   * **Instagram Reels**: Sequential Whisper STT + GPT-5.4 mini normalizing Korean gym slang (`아레베` $\rightarrow$ Side Lateral Raise) into clean exercise records.
 3. **📊 Planfit-Style Live Workout & Volume Tracking**:
    * Real-time set checklist sync (`PUT /sessions/active`).
    * Unfinished workout resume prompt on app open (`GET /sessions/active`).
@@ -40,35 +42,38 @@
 
 ---
 
-## 📡 REST API Catalog (15 Endpoints)
+## 📡 REST API Catalog (17 Endpoints)
 
-| # | Method | Endpoint | Description |
-| :-: | :---: | :--- | :--- |
-| **1** | `POST` | `/reels` | Ingest Instagram Reel URL |
-| **2** | `GET` | `/jobs/{job_id}` | Poll background processing status |
-| **3** | `GET` | `/programs/{program_id}` | Fetch extracted workout program |
-| **4** | `GET` | `/programs` | List routines (by creator or latest) |
-| **5** | `PUT` | `/programs/{program_id}` | Confirm/edit routine sets & weights |
-| **6** | `DELETE` | `/programs/{program_id}` | Delete routine from library |
-| **7** | `POST` | `/programs/merge` | Merge multi-part series into 1 split |
-| **8** | `GET` | `/programs/{program_id}/next-session` | AI Progressive Overload weight recommendations |
-| **9** | `POST` | `/programs/{program_id}/coach-query` | Contextual AI strength coach Q&A |
-| **10** | `POST` | `/exercises/substitute` | 3 AI biomechanically matched exercise swaps |
-| **11** | `PUT` | `/sessions/active` | Real-time set checklist sync & weight saving |
-| **12** | `GET` | `/sessions/active` | Check/resume in-progress workout draft on app open |
-| **13** | `DELETE`| `/sessions/active` | Discard/cancel in-progress workout draft |
-| **14** | `POST` | `/sessions` | Finish workout (Planfit total volume & 1RM calculator) |
-| **15** | `GET` | `/sessions` | Query past workout session volume history |
+| # | Method | Endpoint | Description | Lifecycle Stage |
+| :-: | :---: | :--- | :--- | :--- |
+| **1** | `POST` | `/reels` | Ingest Instagram Reel or YouTube Shorts URL | Ingestion |
+| **2** | `GET` | `/jobs/{job_id}` | Poll background AI processing status | Polling |
+| **3** | `GET` | `/programs/{program_id}` | Fetch extracted workout program | Routine Detail |
+| **4** | `GET` | `/programs` | List routines (by creator or latest) | Library |
+| **5** | `PUT` | `/programs/{program_id}` | Confirm/edit routine sets, weights, and rest times | Customization |
+| **6** | `DELETE` | `/programs/{program_id}` | Delete routine from library | Library Cleanup |
+| **7** | `POST` | `/programs/merge` | Merge multi-part series into 1 split | Series Stitching |
+| **8** | `GET` | `/programs/{program_id}/next-session` | AI Progressive Overload weight recommendations | Pre-Workout |
+| **9** | `POST` | `/programs/{program_id}/coach-query` | Contextual AI strength coach Q&A | Live Coaching |
+| **10** | `POST` | `/exercises/substitute` | 3 AI biomechanically matched exercise swaps | Mid-Workout Swap |
+| **11** | `PUT` | `/sessions/active` | Real-time set checklist sync & weight saving | Live Tracking |
+| **12** | `GET` | `/sessions/active` | Check/resume in-progress workout draft on app open | App Launch |
+| **13** | `DELETE`| `/sessions/active` | Discard/cancel in-progress workout draft | Live Tracking |
+| **14** | `POST` | `/sessions` | Finish workout (Planfit total volume & 1RM calculator) | Workout Finish |
+| **15** | `GET` | `/sessions` | Query past workout session volume history | Analytics |
+| **16** | `PUT` | `/sessions/{session_id}` | Edit logged past workout sets, reps, weights, or notes | History Edit |
+| **17** | `DELETE`| `/sessions/{session_id}` | Delete a past workout session log permanently | History Cleanup |
 
 ---
 
 ## 📱 Mobile Developer Package (`docs/`)
 
-Everything needed for the iOS client is ready in the [`docs/`](docs/) directory:
+Everything needed for iOS & frontend clients is organized in [`docs/`](docs/):
 
-* **[`docs/API_SPECIFICATION.md`](docs/API_SPECIFICATION.md)**: Exhaustive REST API contract with schemas, curl examples, and status codes.
-* **[`docs/SWIFT_MODELS.swift`](docs/SWIFT_MODELS.swift)**: Copy-paste-ready Swift 6 `Codable` domain models.
-* **[`docs/IOS_SHARE_EXTENSION_GUIDE.md`](docs/IOS_SHARE_EXTENSION_GUIDE.md)**: Full Share Extension implementation with App Groups and 300ms toast UX.
+* **[`docs/openapi_2.0.yaml`](docs/openapi_2.0.yaml)** & **[`docs/openapi_2.0.json`](docs/openapi_2.0.json)**: Official OpenAPI 2.0 (Swagger) specifications for Postman, Swagger UI, and Swift OpenAPI Generator.
+* **[`docs/API_SPECIFICATION.md`](docs/API_SPECIFICATION.md)**: Exhaustive REST API contract with curl samples, error handling, and request/response payloads.
+* **[`docs/SWIFT_MODELS.swift`](docs/SWIFT_MODELS.swift)**: Copy-paste-ready Swift 6 `Codable` domain models with `ContentPlatform` and full session payloads.
+* **[`docs/IOS_SHARE_EXTENSION_GUIDE.md`](docs/IOS_SHARE_EXTENSION_GUIDE.md)**: Share Extension implementation guide with App Groups and 300ms toast UX.
 
 ---
 

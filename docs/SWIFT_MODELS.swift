@@ -60,6 +60,13 @@ public enum RepType: String, Codable, Sendable {
     case timedSeconds = "Timed Seconds (시간/초 단위)"
 }
 
+public enum ContentPlatform: String, Codable, Sendable, CaseIterable {
+    case youtubeShorts = "YOUTUBE_SHORTS"
+    case instagramReel = "INSTAGRAM_REEL"
+    case youtubeVideo = "YOUTUBE_VIDEO"
+    case unknown = "UNKNOWN"
+}
+
 public enum JobStatus: String, Codable, Sendable {
     case processing = "PROCESSING"
     case completed = "COMPLETED"
@@ -72,6 +79,7 @@ public struct IngestResponse: Codable, Sendable {
     public let success: Bool
     public let jobId: String
     public let reelId: String
+    public let platform: ContentPlatform?
     public let status: JobStatus
     public let message: String
     public let statusUrl: String
@@ -80,6 +88,7 @@ public struct IngestResponse: Codable, Sendable {
         case success
         case jobId = "job_id"
         case reelId = "reel_id"
+        case platform
         case status
         case message
         case statusUrl = "status_url"
@@ -141,6 +150,7 @@ public struct WorkoutProgram: Codable, Identifiable, Sendable {
     
     public let programId: String
     public var title: String
+    public let platform: ContentPlatform?
     public let splitType: SplitType
     public let overview: String
     public let cycleFrequency: String
@@ -151,6 +161,7 @@ public struct WorkoutProgram: Codable, Identifiable, Sendable {
     enum CodingKeys: String, CodingKey {
         case programId = "program_id"
         case title
+        case platform
         case splitType = "split_type"
         case overview
         case cycleFrequency = "cycle_frequency"
