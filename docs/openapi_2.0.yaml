@@ -1,0 +1,810 @@
+swagger: "2.0"
+info:
+  title: RepReel API
+  description: |
+    REST API for RepReel — AI-Powered Workout Routine Extractor from Instagram Reels and YouTube Shorts.
+    Converts short-form fitness videos into structured workout programs, active session trackers, and AI coaching.
+  version: "1.0.0"
+  contact:
+    name: RepReel Engineering Team
+    email: support@repreel.app
+host: szcr4meit6.execute-api.ap-northeast-2.amazonaws.com
+basePath: /
+schemes:
+  - https
+consumes:
+  - application/json
+produces:
+  - application/json
+
+securityDefinitions:
+  AppSecretAuth:
+    type: apiKey
+    name: x-app-secret
+    in: header
+    description: Shared client secret token configured in the iOS app bundle or client caller.
+  UserEmailAuth:
+    type: apiKey
+    name: x-user-email
+    in: header
+    description: Authenticated user email (e.g. from Sign in with Apple) verified against server whitelist.
+
+security:
+  - AppSecretAuth: []
+    UserEmailAuth: []
+
+paths:
+  /reels:
+    post:
+      summary: Ingest Video URL (Instagram Reel or YouTube Shorts)
+      description: Validates and accepts a short-form video URL and enqueues an asynchronous AI processing job.
+      tags:
+        - Ingestion
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: "#/definitions/IngestRequest"
+      responses:
+        202:
+          description: Processing job accepted and enqueued
+          schema:
+            $ref: "#/definitions/IngestResponse"
+        400:
+          description: Invalid URL or missing parameter
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+        403:
+          description: Unauthorized or forbidden
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+
+  /jobs/{job_id}:
+    get:
+      summary: Poll Ingestion Job Status
+      description: Checks the status of an asynchronous video extraction job.
+      tags:
+        - Ingestion
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          type: string
+          description: The unique identifier of the background job.
+      responses:
+        200:
+          description: Current job status and outcome
+          schema:
+            $ref: "#/definitions/JobStatusResponse"
+        404:
+          description: Job ID not found
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+
+  /programs:
+    get:
+      summary: List Saved Programs
+      description: Returns saved workout programs, optionally filtered by creator or title.
+      tags:
+        - Programs
+      parameters:
+        - name: creator
+          in: query
+          required: false
+          type: string
+          description: Filter programs by creator/influencer handle or name.
+        - name: limit
+          in: query
+          required: false
+          type: integer
+          default: 20
+          description: Maximum number of programs to return.
+      responses:
+        200:
+          description: List of workout programs
+          schema:
+            $ref: "#/definitions/ProgramListResponse"
+
+  /programs/{program_id}:
+    get:
+      summary: Get Workout Program by ID
+      description: Retrieves the complete hierarchical workout program with all exercises and sets.
+      tags:
+        - Programs
+      parameters:
+        - name: program_id
+          in: path
+          required: true
+          type: string
+          description: Unique identifier of the workout program.
+      responses:
+        200:
+          description: Full workout program details
+          schema:
+            $ref: "#/definitions/WorkoutProgram"
+        404:
+          description: Program not found
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+    put:
+      summary: Update Workout Program
+      description: Updates user-confirmed or customized exercises, target sets, weights, or notes.
+      tags:
+        - Programs
+      parameters:
+        - name: program_id
+          in: path
+          required: true
+          type: string
+          description: Unique identifier of the program to update.
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: "#/definitions/UpdateProgramRequest"
+      responses:
+        200:
+          description: Updated workout program
+          schema:
+            $ref: "#/definitions/WorkoutProgram"
+        400:
+          description: Invalid payload
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+        404:
+          description: Program not found
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+    delete:
+      summary: Delete Workout Program
+      description: Permanently removes a workout program from the library.
+      tags:
+        - Programs
+      parameters:
+        - name: program_id
+          in: path
+          required: true
+          type: string
+          description: Unique identifier of the program to delete.
+      responses:
+        200:
+          description: Program deleted successfully
+          schema:
+            $ref: "#/definitions/SuccessResponse"
+        404:
+          description: Program not found
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+
+  /programs/merge:
+    post:
+      summary: Merge Multi-Part Series Programs
+      description: Merges multiple program splits (e.g. Part 1 Upper Body + Part 2 Lower Body) into a single routine.
+      tags:
+        - Programs
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: "#/definitions/MergeProgramsRequest"
+      responses:
+        200:
+          description: Merged workout program
+          schema:
+            $ref: "#/definitions/WorkoutProgram"
+        400:
+          description: Less than 2 programs provided or invalid program IDs
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+
+  /programs/{program_id}/next-session:
+    get:
+      summary: Get Next Session Recommendations (Progressive Overload)
+      description: Calculates recommended target weights and reps for the next session based on previous logs and RPE.
+      tags:
+        - AI Coaching
+      parameters:
+        - name: program_id
+          in: path
+          required: true
+          type: string
+          description: Program ID to calculate recommendations for.
+      responses:
+        200:
+          description: Next session recommendations
+          schema:
+            $ref: "#/definitions/NextSessionResponse"
+
+  /programs/{program_id}/coach-query:
+    post:
+      summary: Ask Contextual AI Coach
+      description: Provides AI strength & conditioning answers grounded in the current routine and user question.
+      tags:
+        - AI Coaching
+      parameters:
+        - name: program_id
+          in: path
+          required: true
+          type: string
+          description: Current program ID context.
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: "#/definitions/CoachQueryRequest"
+      responses:
+        200:
+          description: AI coach response
+          schema:
+            $ref: "#/definitions/CoachQueryResponse"
+
+  /exercises/substitute:
+    post:
+      summary: Get Exercise Substitutions
+      description: Suggests 3 biomechanically matched exercise alternatives (e.g. when gym equipment is busy).
+      tags:
+        - Exercises
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: "#/definitions/ExerciseSubstituteRequest"
+      responses:
+        200:
+          description: 3 suggested exercise alternatives
+          schema:
+            $ref: "#/definitions/ExerciseSubstituteResponse"
+
+  /sessions/active:
+    get:
+      summary: Get In-Progress Workout Draft
+      description: Retrieves unfinished active workout session draft to prompt resume dialog upon app launch.
+      tags:
+        - Live Sessions
+      responses:
+        200:
+          description: Active draft or null if no active draft
+          schema:
+            $ref: "#/definitions/ActiveSessionResponse"
+    put:
+      summary: Save In-Progress Workout Draft
+      description: Saves real-time workout progress and completed checklist items as user works out.
+      tags:
+        - Live Sessions
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: "#/definitions/SaveActiveSessionRequest"
+      responses:
+        200:
+          description: Active draft saved
+          schema:
+            $ref: "#/definitions/SuccessResponse"
+    delete:
+      summary: Discard In-Progress Workout Draft
+      description: Cancels and discards active workout session draft without logging it as completed history.
+      tags:
+        - Live Sessions
+      responses:
+        200:
+          description: Draft discarded
+          schema:
+            $ref: "#/definitions/SuccessResponse"
+
+  /sessions:
+    get:
+      summary: List Workout History Sessions
+      description: Lists past completed workout sessions with calculated total volumes.
+      tags:
+        - Workout History
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          type: integer
+          default: 30
+          description: Maximum number of workout history logs to return.
+      responses:
+        200:
+          description: List of completed workout sessions
+          schema:
+            $ref: "#/definitions/SessionListResponse"
+    post:
+      summary: Log Completed Workout Session
+      description: Commits completed workout session, automatically calculating total volume (Planfit-style).
+      tags:
+        - Workout History
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: "#/definitions/CreateSessionRequest"
+      responses:
+        201:
+          description: Workout session recorded successfully
+          schema:
+            $ref: "#/definitions/SessionRecord"
+
+  /sessions/{session_id}:
+    put:
+      summary: Update Past Workout Session
+      description: Edits sets, reps, weight, or notes in an already logged past session.
+      tags:
+        - Workout History
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          type: string
+          description: Unique session identifier.
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: "#/definitions/UpdateSessionRequest"
+      responses:
+        200:
+          description: Updated workout session record
+          schema:
+            $ref: "#/definitions/SessionRecord"
+        404:
+          description: Session not found
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+    delete:
+      summary: Delete Past Workout Session Log
+      description: Permanently deletes a workout log from user history.
+      tags:
+        - Workout History
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          type: string
+          description: Unique session identifier.
+      responses:
+        200:
+          description: Session log deleted
+          schema:
+            $ref: "#/definitions/SuccessResponse"
+        404:
+          description: Session not found
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+
+definitions:
+  IngestRequest:
+    type: object
+    required:
+      - url
+    properties:
+      url:
+        type: string
+        example: "https://youtube.com/shorts/dQw4w9WgXcQ"
+        description: Public Instagram Reel or YouTube Shorts URL.
+
+  IngestResponse:
+    type: object
+    properties:
+      success:
+        type: boolean
+        example: true
+      job_id:
+        type: string
+        example: "job_a1b2c3d4e5f6"
+      reel_id:
+        type: string
+        example: "dQw4w9WgXcQ"
+      platform:
+        type: string
+        enum:
+          - YOUTUBE_SHORTS
+          - INSTAGRAM_REEL
+          - YOUTUBE_VIDEO
+        example: "YOUTUBE_SHORTS"
+      status:
+        type: string
+        enum:
+          - PROCESSING
+          - COMPLETED
+          - FAILED
+        example: "PROCESSING"
+      message:
+        type: string
+        example: "Youtube Shorts analysis job initiated successfully."
+      status_url:
+        type: string
+        example: "/jobs/job_a1b2c3d4e5f6"
+
+  JobStatusResponse:
+    type: object
+    properties:
+      job_id:
+        type: string
+        example: "job_a1b2c3d4e5f6"
+      reel_id:
+        type: string
+        example: "dQw4w9WgXcQ"
+      status:
+        type: string
+        enum:
+          - PENDING
+          - PROCESSING
+          - COMPLETED
+          - FAILED
+        example: "COMPLETED"
+      program_id:
+        type: string
+        example: "che-dan-sil-ppl-routine-part2"
+      confidence_score:
+        type: number
+        format: float
+        example: 0.98
+      error_message:
+        type: string
+        example: null
+      created_at:
+        type: integer
+        example: 1771977000
+      updated_at:
+        type: integer
+        example: 1771977014
+
+  WorkoutSet:
+    type: object
+    properties:
+      set_number:
+        type: integer
+        example: 1
+      reps:
+        type: integer
+        example: 10
+      target_weight_kg:
+        type: number
+        format: float
+        example: 60.0
+      rest_seconds:
+        type: integer
+        example: 90
+      completed:
+        type: boolean
+        example: false
+
+  ExerciseItem:
+    type: object
+    properties:
+      exercise_id:
+        type: string
+        example: "bench-press"
+      name:
+        type: string
+        example: "Barbell Bench Press"
+      korean_name:
+        type: string
+        example: "바벨 벤치프레스"
+      target_muscle_group:
+        type: string
+        example: "Chest"
+      order:
+        type: integer
+        example: 1
+      sets:
+        type: array
+        items:
+          $ref: "#/definitions/WorkoutSet"
+      form_tips:
+        type: array
+        items:
+          type: string
+        example:
+          - "Keep shoulder blades retracted"
+          - "Touch sternum with control"
+
+  WorkoutProgram:
+    type: object
+    properties:
+      program_id:
+        type: string
+        example: "che-dan-sil-ppl-routine-part2"
+      title:
+        type: string
+        example: "Che-Dan-Sil Chest & Triceps Routine"
+      creator:
+        type: string
+        example: "이정훈"
+      source_url:
+        type: string
+        example: "https://youtube.com/shorts/dQw4w9WgXcQ"
+      platform:
+        type: string
+        example: "YOUTUBE_SHORTS"
+      target_split:
+        type: string
+        example: "Push / Chest"
+      estimated_duration_minutes:
+        type: integer
+        example: 50
+      exercises:
+        type: array
+        items:
+          $ref: "#/definitions/ExerciseItem"
+      created_at:
+        type: integer
+        example: 1771977000
+
+  ProgramListResponse:
+    type: object
+    properties:
+      programs:
+        type: array
+        items:
+          $ref: "#/definitions/WorkoutProgram"
+      count:
+        type: integer
+        example: 5
+
+  UpdateProgramRequest:
+    type: object
+    properties:
+      title:
+        type: string
+        example: "My Customized Push Routine"
+      exercises:
+        type: array
+        items:
+          $ref: "#/definitions/ExerciseItem"
+
+  MergeProgramsRequest:
+    type: object
+    required:
+      - program_ids
+      - new_title
+    properties:
+      program_ids:
+        type: array
+        items:
+          type: string
+        example:
+          - "prog_part1_upper"
+          - "prog_part2_lower"
+      new_title:
+        type: string
+        example: "Full Body 2-Day Split Merged"
+
+  NextSessionResponse:
+    type: object
+    properties:
+      program_id:
+        type: string
+        example: "che-dan-sil-ppl-routine-part2"
+      recommended_exercises:
+        type: array
+        items:
+          type: object
+          properties:
+            exercise_id:
+              type: string
+              example: "bench-press"
+            name:
+              type: string
+              example: "Barbell Bench Press"
+            suggested_weight_kg:
+              type: number
+              format: float
+              example: 62.5
+            suggested_reps:
+              type: integer
+              example: 10
+            progression_reason:
+              type: string
+              example: "Completed 10 reps at RPE 7 last session (+2.5kg increase recommended)"
+
+  CoachQueryRequest:
+    type: object
+    required:
+      - query
+    properties:
+      query:
+        type: string
+        example: "벤치프레스 할 때 오른쪽 어깨 앞쪽이 찝히는 느낌이 들면 어떻게 해야 하나요?"
+
+  CoachQueryResponse:
+    type: object
+    properties:
+      answer:
+        type: string
+        example: "견갑골 후인하강이 풀려 상완골두가 전방 활주되었을 가능성이 높습니다. 그립 너비를 살짝 좁히고 팔꿈치 각도를 45도 내외로 유지해 보세요."
+      sources:
+        type: array
+        items:
+          type: string
+        example:
+          - "Video segment 0:15 - Shoulder position cue"
+
+  ExerciseSubstituteRequest:
+    type: object
+    required:
+      - exercise_id
+      - exercise_name
+    properties:
+      exercise_id:
+        type: string
+        example: "barbell-bench-press"
+      exercise_name:
+        type: string
+        example: "Barbell Bench Press"
+      reason:
+        type: string
+        example: "Rack is occupied"
+
+  ExerciseSubstituteResponse:
+    type: object
+    properties:
+      substitutions:
+        type: array
+        items:
+          type: object
+          properties:
+            name:
+              type: string
+              example: "Dumbbell Flat Bench Press"
+            korean_name:
+              type: string
+              example: "덤벨 플랫 벤치프레스"
+            reason:
+              type: string
+              example: "Same horizontal pushing mechanics with independent stabilizer recruitment."
+            equipment:
+              type: string
+              example: "Dumbbells"
+
+  ActiveSessionResponse:
+    type: object
+    properties:
+      has_active_session:
+        type: boolean
+        example: true
+      active_session:
+        type: object
+        properties:
+          program_id:
+            type: string
+            example: "che-dan-sil-ppl-routine-part2"
+          start_time:
+            type: integer
+            example: 1771977000
+          completed_sets:
+            type: array
+            items:
+              type: object
+              properties:
+                exercise_id:
+                  type: string
+                  example: "bench-press"
+                set_number:
+                  type: integer
+                  example: 1
+                actual_weight_kg:
+                  type: number
+                  example: 60.0
+                actual_reps:
+                  type: integer
+                  example: 10
+
+  SaveActiveSessionRequest:
+    type: object
+    required:
+      - program_id
+      - completed_sets
+    properties:
+      program_id:
+        type: string
+        example: "che-dan-sil-ppl-routine-part2"
+      completed_sets:
+        type: array
+        items:
+          type: object
+
+  CreateSessionRequest:
+    type: object
+    required:
+      - program_id
+      - duration_seconds
+      - exercises
+    properties:
+      program_id:
+        type: string
+        example: "che-dan-sil-ppl-routine-part2"
+      duration_seconds:
+        type: integer
+        example: 3200
+      exercises:
+        type: array
+        items:
+          type: object
+          properties:
+            exercise_id:
+              type: string
+              example: "bench-press"
+            sets:
+              type: array
+              items:
+                type: object
+                properties:
+                  weight_kg:
+                    type: number
+                    example: 60.0
+                  reps:
+                    type: integer
+                    example: 10
+                  rpe:
+                    type: integer
+                    example: 8
+
+  UpdateSessionRequest:
+    type: object
+    properties:
+      notes:
+        type: string
+        example: "Felt strong today, good pump"
+      duration_seconds:
+        type: integer
+        example: 3300
+
+  SessionRecord:
+    type: object
+    properties:
+      session_id:
+        type: string
+        example: "sess_1771977000"
+      program_id:
+        type: string
+        example: "che-dan-sil-ppl-routine-part2"
+      total_volume_kg:
+        type: number
+        format: float
+        example: 4850.0
+      duration_seconds:
+        type: integer
+        example: 3200
+      created_at:
+        type: integer
+        example: 1771977000
+
+  SessionListResponse:
+    type: object
+    properties:
+      sessions:
+        type: array
+        items:
+          $ref: "#/definitions/SessionRecord"
+      total_volume_lifted_kg:
+        type: number
+        format: float
+        example: 48500.0
+
+  SuccessResponse:
+    type: object
+    properties:
+      success:
+        type: boolean
+        example: true
+      message:
+        type: string
+        example: "Operation completed successfully."
+
+  ErrorResponse:
+    type: object
+    properties:
+      error:
+        type: string
+        example: "Forbidden"
+      message:
+        type: string
+        example: "Access denied. User is not in the authorized whitelist."
